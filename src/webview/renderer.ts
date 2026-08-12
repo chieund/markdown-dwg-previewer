@@ -1,80 +1,21 @@
-export type Point2D = { x: number; y: number };
+import type {
+  Point2D,
+  LineEntity,
+  CircleEntity,
+  ArcEntity,
+  PolylineEntity,
+  PointEntity,
+  HatchEntity,
+  TextEntity,
+  DimensionEntity,
+  DxfEntity,
+  Bounds,
+  LayerInfo,
+  ViewportView,
+  DxfPage,
+} from '../shared/types';
 
-interface EntityBase {
-  layer: string;
-  color: string;
-  linetype?: string;
-  lineweight?: number;
-}
-
-export type LineEntity = EntityBase & { type: 'LINE'; start: Point2D; end: Point2D };
-export type CircleEntity = EntityBase & { type: 'CIRCLE'; center: Point2D; radius: number };
-export type ArcEntity = EntityBase & {
-  type: 'ARC';
-  center: Point2D;
-  radius: number;
-  startAngle: number;
-  endAngle: number;
-};
-export type PolylineEntity = EntityBase & {
-  type: 'POLYLINE';
-  points: Point2D[];
-  closed: boolean;
-  filled?: boolean;
-};
-export type PointEntity = EntityBase & { type: 'POINT'; position: Point2D };
-export type HatchEntity = EntityBase & {
-  type: 'HATCH';
-  loops: Point2D[][];
-  solid: boolean;
-  patternAngle: number;
-  patternSpacing: number;
-};
-export type TextEntity = EntityBase & {
-  type: 'TEXT';
-  position: Point2D;
-  text: string;
-  height: number;
-  rotation: number;
-  hAlign?: 'left' | 'center' | 'right';
-  vAlign?: 'baseline' | 'bottom' | 'middle' | 'top';
-  fontFamily?: string;
-};
-export type DimensionEntity = EntityBase & {
-  type: 'DIMENSION';
-  textPosition: Point2D;
-  text: string;
-  height: number;
-  linePoint1?: Point2D;
-  linePoint2?: Point2D;
-};
-
-export type DxfEntity =
-  | LineEntity
-  | CircleEntity
-  | ArcEntity
-  | PolylineEntity
-  | PointEntity
-  | HatchEntity
-  | TextEntity
-  | DimensionEntity;
-
-export type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
-
-export type LayerInfo = { name: string; color: string; entityCount: number };
-
-export type ViewportView = {
-  rect: { x: number; y: number; width: number; height: number };
-  entities: DxfEntity[];
-};
-
-export type DxfPage = {
-  name: string;
-  entities: DxfEntity[];
-  bounds: Bounds | null;
-  layers: LayerInfo[];
-  viewports?: ViewportView[];
-};
+export type { Point2D, DxfEntity, Bounds, LayerInfo, ViewportView, DxfPage };
 
 export const SVG_NS = 'http://www.w3.org/2000/svg';
 

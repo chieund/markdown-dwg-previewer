@@ -156,5 +156,7 @@ npm run package
 
 MIT
 
-The bundled converter (libdxfrw-web) is licensed under GPL-2.0. It runs as a
-separate WASM module and its output (DXF text) is consumed as data.
+The bundled converters are licensed separately:
+- `libredwg-web` (primary converter): GPL-3.0 — runs as a separate WASM module,
+  its output (DXF text) is consumed as data.
+- `libdxfrw-web` (fallback converter): GPL-2.0 — same isolation model.

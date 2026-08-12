@@ -21,7 +21,24 @@ const webviewConfig = {
   sourcemap: true,
 };
 
+// Corpus test harness. Output lands one level below the project root — the same
+// depth as out/extension.js — so converter.ts resolves the WASM through exactly
+// the path it will use in the packaged extension.
+const corpusConfig = {
+  entryPoints: ['test/corpus.ts'],
+  bundle: true,
+  outfile: 'out-test/corpus.js',
+  platform: 'node',
+  format: 'cjs',
+  external: ['vscode', '@mlightcad/libdxfrw-web', '@mlightcad/libredwg-web'],
+  sourcemap: true,
+};
+
 async function run() {
+  if (process.argv.includes('--corpus')) {
+    await esbuild.build(corpusConfig);
+    return;
+  }
   if (watch) {
     const ctxExtension = await esbuild.context(extensionConfig);
     const ctxWebview = await esbuild.context(webviewConfig);

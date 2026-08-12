@@ -18,6 +18,10 @@ let canvasHost: HTMLElement | null = null;
 let layerSlot: HTMLElement | null = null;
 let activeSvg: SVGSVGElement | null = null;
 let disposeActivePanZoom: (() => void) | null = null;
+/** Incremented on each renderCanvas call; stale rAF chains check this and bail. */
+let renderGeneration = 0;
+/** Dispose function for the document-level click listener on the layer panel. */
+let disposeLayerOutsideClick: (() => void) | null = null;
 
 function fitBounds(bounds: Bounds): ViewBox {
   const width = bounds.maxX - bounds.minX || 1;
@@ -33,8 +37,19 @@ function fitBounds(bounds: Bounds): ViewBox {
 
 const EMPTY_VIEW: ViewBox = { x: -50, y: -50, w: 100, h: 100 };
 
+/**
+ * Draws a page into the host element.
+ *
+ * For large drawings (>3000 entities), rendering is batched across animation
+ * frames to avoid freezing the UI. Smaller drawings render synchronously.
+ *
+ * A generation token ensures that if renderCanvas is called again (e.g. layer
+ * toggle) before the previous batch completes, the stale chain bails out
+ * immediately instead of burning CPU appending to a detached DOM tree.
+ */
 function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string>, keepView: boolean) {
   const previousView = keepView && activeSvg ? getViewBox(activeSvg) : null;
+  const thisGeneration = ++renderGeneration;
 
   disposeActivePanZoom?.();
   disposeActivePanZoom = null;
@@ -51,15 +66,50 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
 
   const styleGroup = document.createElementNS(SVG_NS, 'g');
 
+  // Viewport content sits behind the sheet
   for (const view of page.viewports ?? []) {
     const el = renderViewport(view, hiddenLayers);
     if (el) styleGroup.appendChild(el);
   }
 
-  for (const entity of page.entities) {
-    if (hiddenLayers.has(entity.layer)) continue;
-    const el = renderEntity(entity);
-    if (el) styleGroup.appendChild(el);
+  // Filter visible entities
+  const visibleEntities = page.entities.filter(e => !hiddenLayers.has(e.layer));
+
+  const BATCH_SIZE = 3000;
+
+  if (visibleEntities.length <= BATCH_SIZE) {
+    // Small drawing: render all at once
+    for (const entity of visibleEntities) {
+      const el = renderEntity(entity);
+      if (el) styleGroup.appendChild(el);
+    }
+  } else {
+    // Large drawing: render first batch immediately, rest progressively
+    for (let i = 0; i < BATCH_SIZE; i++) {
+      const el = renderEntity(visibleEntities[i]);
+      if (el) styleGroup.appendChild(el);
+    }
+
+    // Render remaining entities in batches via requestAnimationFrame
+    let offset = BATCH_SIZE;
+    const renderNextBatch = () => {
+      // Bail if a newer renderCanvas call has started
+      if (renderGeneration !== thisGeneration) return;
+      if (offset >= visibleEntities.length) return;
+
+      const end = Math.min(offset + BATCH_SIZE, visibleEntities.length);
+      const fragment = document.createDocumentFragment();
+      for (let i = offset; i < end; i++) {
+        const el = renderEntity(visibleEntities[i]);
+        if (el) fragment.appendChild(el);
+      }
+      styleGroup.appendChild(fragment);
+      offset = end;
+      if (offset < visibleEntities.length) {
+        requestAnimationFrame(renderNextBatch);
+      }
+    };
+    requestAnimationFrame(renderNextBatch);
   }
 
   flipGroup.appendChild(styleGroup);
@@ -137,6 +187,9 @@ function buildPageSelect(scene: Scene): HTMLElement | null {
 
 function refreshLayerControl() {
   if (!layerSlot || !scene) return;
+  // Remove previous document-level listener before rebuilding
+  disposeLayerOutsideClick?.();
+  disposeLayerOutsideClick = null;
   layerSlot.innerHTML = '';
   const control = buildLayerControl(scene);
   if (control) layerSlot.appendChild(control);
@@ -224,9 +277,11 @@ function buildLayerControl(scene: Scene): HTMLElement | null {
   button.addEventListener('click', () => {
     panel.hidden = !panel.hidden;
   });
-  document.addEventListener('click', (event) => {
+  const outsideClickHandler = (event: MouseEvent) => {
     if (!panel.hidden && !wrapper.contains(event.target as Node)) panel.hidden = true;
-  });
+  };
+  document.addEventListener('click', outsideClickHandler);
+  disposeLayerOutsideClick = () => document.removeEventListener('click', outsideClickHandler);
 
   updateButton();
   return wrapper;
@@ -325,7 +380,8 @@ function showError(message: string) {
 window.addEventListener('message', (event) => {
   const message = event.data as
     | { type: 'DXF_DATA'; pages: DxfPage[]; skippedEntityTypes: string[] }
-    | { type: 'DXF_ERROR'; message: string };
+    | { type: 'DXF_ERROR'; message: string }
+    | { type: 'DXF_PROGRESS'; stage: string };
 
   if (message.type === 'DXF_DATA') {
     try {
@@ -335,6 +391,8 @@ window.addEventListener('message', (event) => {
     }
   } else if (message.type === 'DXF_ERROR') {
     showError(message.message);
+  } else if (message.type === 'DXF_PROGRESS') {
+    showProgress(message.stage);
   }
 });
 
@@ -347,7 +405,27 @@ function showLoading() {
   spinner.className = 'dwg-loading';
   spinner.innerHTML = `
     <div class="dwg-spinner"></div>
-    <span>Converting and loading DWG drawing…</span>
+    <span class="dwg-loading-text">Loading drawing…</span>
   `;
   root.appendChild(spinner);
+}
+
+function showProgress(stage: string) {
+  const textEl = root.querySelector('.dwg-loading-text');
+  if (!textEl) {
+    showLoading();
+    const newTextEl = root.querySelector('.dwg-loading-text');
+    if (newTextEl) newTextEl.textContent = stageLabel(stage);
+    return;
+  }
+  textEl.textContent = stageLabel(stage);
+}
+
+function stageLabel(stage: string): string {
+  switch (stage) {
+    case 'reading': return 'Reading DWG file…';
+    case 'converting': return 'Converting DWG → DXF…';
+    case 'parsing': return 'Parsing drawing data…';
+    default: return 'Processing…';
+  }
 }

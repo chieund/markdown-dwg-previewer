@@ -3,6 +3,13 @@ import * as path from 'path';
 import { convertDwgToDxf } from './dwg/converter';
 import { parseDxf } from './dxf/parseDxf';
 
+/** Cache parsed results keyed by file path + mtime to avoid re-converting unchanged files. */
+interface CacheEntry {
+  mtime: number;
+  parsed: ReturnType<typeof parseDxf>;
+}
+const parseCache = new Map<string, CacheEntry>();
+
 export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
   public static readonly viewType = 'dwgPreviewer.dwgView';
 
@@ -21,16 +28,35 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
     const sendContent = async () => {
       try {
+        const filePath = document.uri.fsPath;
+        const stat = await vscode.workspace.fs.stat(document.uri);
+        const mtime = stat.mtime;
+
+        // Check cache — skip expensive conversion if file hasn't changed
+        const cached = parseCache.get(filePath);
+        if (cached && cached.mtime === mtime) {
+          webviewPanel.webview.postMessage({ type: 'DXF_DATA', ...cached.parsed });
+          return;
+        }
+
+        webviewPanel.webview.postMessage({ type: 'DXF_PROGRESS', stage: 'reading' });
         const bytes = await vscode.workspace.fs.readFile(document.uri);
         const dwgBuffer = Buffer.from(bytes);
 
         // Convert DWG → DXF text
+        webviewPanel.webview.postMessage({ type: 'DXF_PROGRESS', stage: 'converting' });
         const converterPath = vscode.workspace
           .getConfiguration('dwgPreviewer')
           .get<string>('converterPath', '');
 
         const dxfText = await convertDwgToDxf(dwgBuffer, document.uri.fsPath, converterPath);
+
+        webviewPanel.webview.postMessage({ type: 'DXF_PROGRESS', stage: 'parsing' });
         const parsed = parseDxf(dxfText);
+
+        // Store in cache
+        parseCache.set(filePath, { mtime, parsed });
+
         webviewPanel.webview.postMessage({ type: 'DXF_DATA', ...parsed });
       } catch (err) {
         webviewPanel.webview.postMessage({

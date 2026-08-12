@@ -1,17 +1,25 @@
 {
   "name": "dwg-previewer",
   "displayName": "DWG Previewer",
-  "description": "Preview 2D AutoCAD DWG drawings directly in VS Code — converts DWG to DXF internally and renders as SVG.",
-  "version": "1.0.0",
+  "description": "View AutoCAD DWG drawings inside VS Code — no AutoCAD needed. Open .dwg files instantly with pan, zoom, layer control and SVG/PNG export.",
+  "version": "1.0.1",
   "publisher": "bumkom",
   "license": "MIT",
   "icon": "icon.png",
   "keywords": [
     "dwg",
+    "dwg viewer",
+    "dwg preview",
     "autocad",
     "cad",
+    "cad viewer",
     "drawing",
-    "preview"
+    "blueprint",
+    "floor plan",
+    "2d",
+    "viewer",
+    "architecture",
+    "engineering"
   ],
   "repository": {
     "type": "git",
@@ -53,8 +61,10 @@
     "build": "node esbuild.js",
     "watch": "node esbuild.js --watch",
     "typecheck": "tsc --noEmit",
-    "package": "vsce package",
-    "publish": "vsce publish",
+    "test": "tsc -p tsconfig.test.json && node --test out-test/test/*.test.js",
+    "test:corpus": "node esbuild.js --corpus && node out-test/corpus.js",
+    "package": "vsce package --readme-path MARKETPLACE.md",
+    "publish": "vsce publish --readme-path MARKETPLACE.md",
     "vscode:prepublish": "npm run build"
   },
   "dependencies": {

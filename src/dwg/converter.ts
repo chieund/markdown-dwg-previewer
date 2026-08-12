@@ -11,6 +11,7 @@
  */
 
 import * as path from 'path';
+import { pathToFileURL } from 'url';
 import { execFile } from 'child_process';
 import { promises as fs } from 'fs';
 import * as os from 'os';
@@ -22,6 +23,18 @@ const execFileAsync = promisify(execFile);
 let libredwgModule: any = null;
 let libdxfrwModule: any = null;
 
+/** Optional logger — set by the extension to pipe diagnostics to an OutputChannel. */
+let log: (msg: string) => void = () => {};
+
+/** Allows the extension host to inject a logger (e.g. OutputChannel.appendLine). */
+export function setConverterLogger(fn: (msg: string) => void): void {
+  log = fn;
+}
+
+function describeError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /**
  * Loads the libredwg WASM module (GNU LibreDWG — most capable parser).
  * Uses dynamic import() since the WASM JS file is ESM.
@@ -30,10 +43,14 @@ async function getLibredwgModule(): Promise<any> {
   if (libredwgModule) return libredwgModule;
   try {
     const wasmPath = path.resolve(__dirname, '..', 'node_modules', '@mlightcad', 'libredwg-web', 'wasm', 'libredwg-web.js');
-    const { default: createModule } = await import(wasmPath);
+    // pathToFileURL ensures Windows paths (C:\...) become valid file:// URLs for ESM import()
+    const wasmUrl = pathToFileURL(wasmPath).href;
+    const { default: createModule } = await import(wasmUrl);
     libredwgModule = await createModule();
+    log('libredwg-web WASM loaded successfully');
     return libredwgModule;
-  } catch {
+  } catch (err) {
+    log(`libredwg-web WASM load failed: ${describeError(err)}`);
     return null;
   }
 }
@@ -46,8 +63,10 @@ async function getLibdxfrwModule(): Promise<any> {
   try {
     const createModule = require('@mlightcad/libdxfrw-web/dist/libdxfrw.js');
     libdxfrwModule = await createModule();
+    log('libdxfrw-web WASM loaded successfully');
     return libdxfrwModule;
-  } catch {
+  } catch (err) {
+    log(`libdxfrw-web WASM load failed: ${describeError(err)}`);
     return null;
   }
 }
@@ -73,19 +92,24 @@ async function convertWithLibredwg(dwgBuffer: Buffer): Promise<string | null> {
       try {
         libredwg.FS.stat('/output.dxf');
       } catch {
+        log(`libredwg dwg_write_dxf returned ${result} and no output file was produced`);
         return null;
       }
+      log(`libredwg dwg_write_dxf returned ${result} (warnings), output file exists`);
     }
 
     // Read DXF from virtual filesystem
     const dxfContent = libredwg.FS.readFile('/output.dxf', { encoding: 'utf8' });
 
     if (!dxfContent || !dxfContent.trim()) {
+      log('libredwg produced empty DXF output');
       return null;
     }
 
+    log(`libredwg conversion OK: ${(dxfContent.length / 1024).toFixed(0)}KB DXF`);
     return dxfContent;
-  } catch {
+  } catch (err) {
+    log(`libredwg conversion error: ${describeError(err)}`);
     return null;
   } finally {
     try { libredwg.FS.unlink('/input.dwg'); } catch { /* ignore */ }
@@ -113,14 +137,24 @@ async function convertWithLibdxfrw(dwgBuffer: Buffer): Promise<string | null> {
     const uint8 = new Uint8Array(dwgBuffer);
     dwg = new libdxfrw.DRW_DwgR(uint8);
 
-    if (!dwg.read(fileHandler, false)) return null;
+    if (!dwg.read(fileHandler, false)) {
+      log('libdxfrw DRW_DwgR.read() returned false');
+      return null;
+    }
 
     const dxfContent = fileHandler.fileExport(
       libdxfrw.DRW_Version.AC1021, false, database, false
     );
 
-    return (dxfContent && dxfContent.trim()) ? dxfContent : null;
-  } catch {
+    if (!(dxfContent && dxfContent.trim())) {
+      log('libdxfrw fileExport produced empty output');
+      return null;
+    }
+
+    log(`libdxfrw conversion OK: ${(dxfContent.length / 1024).toFixed(0)}KB DXF`);
+    return dxfContent;
+  } catch (err) {
+    log(`libdxfrw conversion error: ${describeError(err)}`);
     return null;
   } finally {
     try { dwg?.delete(); } catch { /* ignore */ }
@@ -142,23 +176,33 @@ export async function convertDwgToDxf(
   dwgPath: string,
   converterPath: string
 ): Promise<string> {
+  log(`Converting ${path.basename(dwgPath)} (${(dwgBuffer.length / 1024).toFixed(0)}KB)`);
+
   // If user explicitly configured a CLI tool, use it directly
   if (converterPath) {
+    log(`Strategy: configured CLI converter (${converterPath})`);
     return convertWithCli(dwgBuffer, dwgPath, converterPath);
   }
 
   // Try libredwg-web first (most capable, handles large/complex files)
+  log('Strategy 1/3: libredwg-web WASM');
   const libredwgResult = await convertWithLibredwg(dwgBuffer);
   if (libredwgResult) return libredwgResult;
 
   // Fall back to libdxfrw-web (lighter, sometimes works when libredwg doesn't)
+  log('Strategy 2/3: libdxfrw-web WASM');
   const libdxfrwResult = await convertWithLibdxfrw(dwgBuffer);
   if (libdxfrwResult) return libdxfrwResult;
 
   // Last resort: CLI tool on PATH
+  log('Strategy 3/3: searching PATH for an external CLI converter');
   const tool = await findConverter();
-  if (tool) return convertWithCli(dwgBuffer, dwgPath, tool);
+  if (tool) {
+    log(`Found CLI converter: ${tool}`);
+    return convertWithCli(dwgBuffer, dwgPath, tool);
+  }
 
+  log('No external converter found — all three strategies exhausted');
   throw new Error(
     'Failed to convert DWG file.\n\n' +
       'The bundled converters could not process this file.\n\n' +
@@ -186,11 +230,19 @@ async function convertWithCli(dwgBuffer: Buffer, dwgPath: string, tool: string):
     } else {
       try {
         await execFileAsync(tool, [tmpDwg, '-o', tmpDxf], { timeout: 60_000, maxBuffer: 50 * 1024 * 1024 });
-      } catch { /* dwg2dxf may warn but still produce output */ }
+      } catch (err) {
+        // dwg2dxf may warn but still produce output — only a missing/empty
+        // DXF below proves it actually failed.
+        log(`CLI ${toolName} exited non-zero (may still have written output): ${describeError(err)}`);
+      }
     }
     const dxfContent = await fs.readFile(tmpDxf, 'utf-8');
     if (!dxfContent.trim()) throw new Error('Converter produced an empty DXF file.');
+    log(`CLI conversion OK: ${(dxfContent.length / 1024).toFixed(0)}KB DXF`);
     return dxfContent;
+  } catch (err) {
+    log(`CLI conversion failed (${tool}): ${describeError(err)}`);
+    throw err;
   } finally {
     await cleanupDir(tmpDir);
   }

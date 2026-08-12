@@ -1,10 +1,12 @@
 # Everything the extension needs is bundled into out/extension.js and
-# out/webview/main.js. The WASM converter (@mlightcad/libdxfrw-web)
-# is kept in node_modules since it loads .wasm at runtime.
+# out/webview/main.js. The WASM converters (@mlightcad/libredwg-web and
+# @mlightcad/libdxfrw-web) are kept in node_modules since they load .wasm
+# at runtime — converter.ts resolves them relative to out/.
 
 .git/**
 .github/**
 .vscode/**
+.claude/**
 node_modules/**
 !node_modules/@mlightcad/libdxfrw-web/**
 !node_modules/@mlightcad/libredwg-web/**
@@ -13,12 +15,21 @@ src/**
 test/**
 scripts/**
 docs/**
+assets/**
+
+# Internal development docs — not shipped to users.
+# The Marketplace page comes from MARKETPLACE.md instead (see the `package`
+# script's --readme-path); README.md is the internal doc for the team.
+README.md
+ARCHITECTURE.md
+PROGRESS.md
 
 esbuild.js
 tsconfig.json
 
-out/test/**
+out-test/**
 **/*.map
 **/*.ts
 **/.gitignore
 **/tsconfig.json
+tsconfig.*.json
