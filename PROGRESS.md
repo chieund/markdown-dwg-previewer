@@ -306,7 +306,7 @@ markdown-dwg-previewer/
 ├── package.json
 ├── tsconfig.json
 ├── tsconfig.test.json        ← build test ra out-test/
-├── esbuild.js
+├── esbuild.js                ← 4 target: extension · webview · corpus · preview
 ├── icon.png                  ← logo 256×256 (ship kèm extension)
 ├── MARKETPLACE.md            ← trang public trên Marketplace (ship)
 ├── README.md                 ← tài liệu nội bộ cho team, không ship
@@ -320,17 +320,20 @@ markdown-dwg-previewer/
 ├── assets/                   ← không ship
 │   ├── make-icon.py          ← script sinh icon.png
 │   ├── preview-32.png        ← xem trước cỡ sidebar
-│   └── preview-64.png
+│   ├── preview-64.png
+│   └── preview-*.png         ← ảnh UI thật, dùng được cho Marketplace
 ├── scripts/                  ← không ship
 │   └── preview.ts            ← chụp UI thật bằng Chromium headless
-├── test/                     ← 66 unit test, không ship
+├── test/                     ← 72 unit test, không ship
 │   ├── matrix.test.ts
 │   ├── bulge.test.ts
 │   ├── spline.test.ts
 │   ├── viewport.test.ts
 │   ├── hatch.test.ts
 │   ├── renderer.test.ts
-│   ├── format.test.ts
+│   ├── format.test.ts        ← nhận diện DWG / DXF / DXF nhị phân
+│   ├── panZoom.test.ts       ← toán zoom, giữ điểm neo
+│   ├── insert-ocs.test.ts    ← INSERT bị mirror (test parseDxf đầu tiên)
 │   ├── corpus.ts             ← harness chạy cả thư mục .dwg/.dxf
 │   └── corpus-baseline.json  ← mốc regression (nên commit)
 └── src/
@@ -339,7 +342,8 @@ markdown-dwg-previewer/
     ├── shared/
     │   └── types.ts          ← wire format dùng chung host ↔ webview
     ├── dwg/
-    │   └── converter.ts
+    │   ├── format.ts         ← nhận diện định dạng theo header
+    │   └── converter.ts      ← DWG → DXF, 3 chiến lược
     ├── dxf/
     │   ├── parseDxf.ts
     │   ├── types.ts          ← re-export từ shared/types.ts
@@ -347,9 +351,10 @@ markdown-dwg-previewer/
     │   ├── viewport.ts
     │   ├── bulge.ts
     │   ├── spline.ts
-    │   └── matrix.ts
+    │   └── matrix.ts         ← affine 2D + extrusionMatrix (OCS)
     └── webview/
         ├── main.ts
+        ├── styles.ts         ← CSS tách riêng, preview harness dùng lại
         ├── renderer.ts
         ├── panZoom.ts
         └── export.ts
@@ -369,7 +374,14 @@ npm test             # 72 unit test (node:test, không cần dependency ngoài)
 # Corpus test — chạy pipeline thật trên cả thư mục .dwg
 npm run test:corpus -- /đường/dẫn/tới/thư-mục          # đối chiếu baseline
 npm run test:corpus -- /đường/dẫn/tới/thư-mục --save   # ghi baseline mới
+
 npm run package      # Đóng gói .vsix (dùng MARKETPLACE.md làm trang public)
+
+# Chụp UI thật bằng Chromium headless → assets/
+npm run preview -- <file.dwg|file.dxf>
+npm run preview -- <file> --layers    # mở sẵn panel layer
+npm run preview -- <file> --filter    # panel layer đang lọc
+npm run preview -- <file> --hidden    # trạng thái ẩn hết layer
 
 python3 assets/make-icon.py   # Sinh lại icon.png + ảnh xem trước
 ```
