@@ -1,8 +1,8 @@
 # DWG Previewer — Tiến độ phát triển
 
-**Cập nhật lần cuối:** 2026-08-12 11:32
+**Cập nhật lần cuối:** 2026-08-12 15:45
 
-**Trạng thái:** đã đóng gói `dwg-previewer-1.0.1.vsix` (3.09 MB) — sẵn sàng upload Marketplace, còn 3 việc cần xác nhận ở mục [Chuẩn bị publish](#-chuẩn-bị-publish)
+**Trạng thái:** đã đóng gói `dwg-previewer-1.0.3.vsix` (3.09 MB) — cải thiện UI/UX — sẵn sàng upload Marketplace, còn 3 việc cần xác nhận ở mục [Chuẩn bị publish](#-chuẩn-bị-publish)
 
 ---
 
@@ -20,13 +20,19 @@
 - [x] `icon.png` — logo 256×256, sinh bằng `assets/make-icon.py` (sửa toạ độ/màu ở đầu script rồi chạy lại)
 
 ### 2. Extension Host (Node.js)
-- [x] `extension.ts` — activation, đăng ký custom editor cho `*.dwg`
+- [x] `extension.ts` — activation, đăng ký custom editor cho `*.dwg` và `*.dxf`
 - [x] `dwgEditorProvider.ts` — lifecycle, webview HTML, file watcher, export handler
 - [x] **Cache hệ thống** — kết quả parse cache theo `path + mtime`, mở lại cùng file = instant
 - [x] **Progress messages** — gửi stage (reading → converting → parsing) cho webview
 - [x] **OutputChannel "DWG Previewer"** — `setConverterLogger()` bơm logger vào converter, mọi bước convert đều có vết để hỗ trợ user khi file lỗi
 
-### 3. DWG → DXF Converter (`src/dwg/converter.ts`)
+### 3. Nhận diện định dạng (`src/dwg/format.ts`)
+- [x] `detectDrawingFormat()` — phân biệt DWG / DXF text / DXF nhị phân **bằng header của file, không tin phần mở rộng**
+- [x] File `.dxf` **bỏ qua hoàn toàn bước convert**, đưa thẳng vào parser — DXF vốn là định dạng trung gian của extension
+- [x] DXF nhị phân và file lạ được báo lỗi rõ ràng kèm cách khắc phục, thay vì mở ra canvas trắng
+- [x] Đã kiểm chứng: 17 file DXF sinh từ corpus DWG cho **entity count khớp tuyệt đối**, convert từ 14–562ms xuống 0–13ms
+
+### 4. DWG → DXF Converter (`src/dwg/converter.ts`)
 - [x] **Primary: `@mlightcad/libredwg-web` v0.7.9 (GNU LibreDWG WASM, 10MB)**
   - Dùng `dwg_write_dxf()` qua Emscripten virtual filesystem
   - Hỗ trợ DWG R14 → 2020+
@@ -41,12 +47,12 @@
 - [x] **Zero-install** — user không cần cài tool nào, cả 2 WASM bundled trong extension
 - [x] **Log chi tiết mọi nhánh** — ghi `Strategy 1/3 → 2/3 → 3/3`, lý do từng chiến lược fail, size DXF khi thành công; nhánh CLI cũng log exit code và output rỗng
 
-### 4. Shared types (`src/shared/types.ts`)
+### 5. Shared types (`src/shared/types.ts`)
 - [x] **Single source of truth** cho wire format truyền qua `postMessage`
 - [x] Cả extension host lẫn webview import từ đây → sửa lệch một bên là compile lỗi ngay, không còn rủi ro sai âm thầm lúc runtime
 - [x] `src/dxf/types.ts` giữ lại làm lớp re-export để các file trong `dxf/` không phải sửa import
 
-### 5. DXF Parser (`src/dxf/`)
+### 6. DXF Parser (`src/dxf/`)
 - [x] `parseDxf.ts` — main parser (dxf-parser + custom scanners, 1400+ lines)
 - [x] `hatch.ts` — HATCH entity scanner (solid + pattern fill)
 - [x] `viewport.ts` — viewport scanner + paper→model transform
@@ -55,7 +61,7 @@
 - [x] `matrix.ts` — 2D affine transforms (translate/rotate/scale/mirror)
 - [x] `types.ts` — re-export từ `shared/types.ts` (giữ đường import cũ cho các file trong `dxf/`)
 
-### 6. Webview Renderer (`src/webview/`)
+### 7. Webview Renderer (`src/webview/`)
 - [x] `main.ts` — toolbar, layers panel, page selector, message handling
 - [x] `renderer.ts` — entity → SVG element rendering
 - [x] `panZoom.ts` — scroll zoom, drag pan, double-click fit
@@ -64,9 +70,15 @@
 - [x] **Generation token** — mỗi lần `renderCanvas` chạy sẽ tăng counter; chuỗi rAF cũ thấy lệch là thoát ngay, không còn nhiều lượt render chồng nhau khi toggle layer liên tục
 - [x] **Dọn listener** — `disposeLayerOutsideClick` gỡ listener `document` của layer panel trước khi dựng panel mới, không rò khi chuyển page
 - [x] **Progress indicator** — hiển thị stage: Reading → Converting → Parsing
+- [x] **Empty state** — canvas trống luôn tự giải thích: bản vẽ không có hình 2D, hay đã ẩn hết layer (kèm nút hoàn tác)
+- [x] **Thanh trạng thái** — toạ độ con trỏ theo đơn vị bản vẽ, mức zoom, số object, và dòng gợi ý thao tác
+- [x] **Nút zoom −/+/Fit** trên toolbar — trước đó chỉ có lăn chuột và double-click, người dùng trackpad bị kẹt
+- [x] **Lọc + isolate layer** — ô tìm kiếm và nút `only`; bản vẽ 117 layer không còn phải cuộn tay
+- [x] Kéo bằng chuột giữa, con trỏ đổi thành `grabbing` khi kéo
+- [x] CSS tách ra `src/webview/styles.ts` để preview harness dùng lại được
 - [x] Dark theme CSS khớp VS Code variables
 
-### 7. Supported Entities
+### 8. Supported Entities
 | Category | Entities |
 |----------|----------|
 | Geometry | LINE · CIRCLE · ARC · POLYLINE · LWPOLYLINE · SPLINE · ELLIPSE |
@@ -76,25 +88,33 @@
 | Annotations | DIMENSION (label + line) |
 | Other | POINT · 3DFACE (wireframe) |
 
-### 8. Unit test (`test/`)
-- [x] **48 test, chạy bằng `node:test`** — Node 20 có sẵn, không thêm dependency nào
+### 9. Unit test (`test/`)
+- [x] **66 test, chạy bằng `node:test`** — Node 20 có sẵn, không thêm dependency nào
 - [x] `matrix.test.ts` — compose/thứ tự nhân, similarity vs scale không đều, mirror qua dấu determinant
 - [x] `bulge.test.ts` — bulge 1 = nửa đường tròn, bulge âm đảo chiều, polyline đóng không lặp điểm đầu
 - [x] `spline.test.ts` — de Boor khớp Bézier tại điểm giữa, input hỏng trả về rỗng, curve nằm trong convex hull
 - [x] `viewport.test.ts` — transform paper↔model, twist, loại pseudo-viewport của chính tờ giấy
 - [x] `hatch.test.ts` — quét HATCH từ group code thô, boundary cong, loại loop dưới 3 điểm
 - [x] `renderer.test.ts` — cờ large-arc và sweep âm trong `arcToPathData`
+- [x] `format.test.ts` — nhận diện DWG/DXF/DXF nhị phân, BOM, comment 999, file đổi đuôi sai
+- [x] `panZoom.test.ts` — chiều zoom, giữ điểm neo khi zoom, ánh xạ toạ độ con trỏ
 - [x] **Đã mutation test** — cố tình phá 5 chỗ (đảo thứ tự `multiply`, đảo chiều bulge, bỏ cờ large-arc, lệch chỉ số knot, sai dấu twist), cả 5 đều bị test bắt
 
-### 9. Corpus test (`test/corpus.ts`)
+### 10. Preview harness (`scripts/preview.ts`)
+- [x] Dựng webview thật ra HTML rồi chụp bằng Chromium headless — **dùng đúng CSS và đúng bundle** của bản đóng gói, không phải bản dựng lại gần giống
+- [x] Có cờ `--layers` / `--filter` / `--hidden` để chụp cả những state cần thao tác
+- [x] **Đã bắt được bug thật**: `.dwg-layer-row` có `display: flex` đè lên `[hidden]` của trình duyệt → ô lọc layer gõ vào mà danh sách không đổi. Typecheck và unit test không thể phát hiện lỗi này
+- [x] Ảnh xuất ra `assets/` — dùng luôn được làm ảnh minh hoạ cho Marketplace
+
+### 11. Corpus test (`test/corpus.ts`)
 - [x] Chạy pipeline thật (DWG → DXF → parse) trên cả một thư mục `.dwg`, báo cáo từng file: size, DXF size, thời gian convert/parse, số page/entity/layer
 - [x] **Baseline regression** — `test/corpus-baseline.json` lưu kết quả mốc; lần chạy sau tụt entity hoặc chuyển sang lỗi là báo REGRESSION và exit code 1
 - [x] Bundle ra `out-test/corpus.js` — cùng độ sâu thư mục với `out/extension.js`, nên converter tìm WASM đúng theo đường dẫn dùng khi đóng gói thật
 - [x] **Đã kiểm chứng harness** — tắt `injectHatches()` thì 4 file tụt entity, báo REGRESSION, exit 1; bật lại thì khớp baseline, exit 0
 - [x] Kết quả trên 17 sample drawing của AutoCAD: **17/17 convert + parse thành công**
 
-### 10. User Features
-- [x] Zero-config — cài extension, mở file `.dwg` = xem luôn
+### 12. User Features
+- [x] Zero-config — cài extension, mở file `.dwg` / `.dxf` = xem luôn
 - [x] Pan & zoom — scroll/drag/double-click
 - [x] Layer control — show/hide/show all/hide all
 - [x] Multi-page — Model Space + Paper Space sheets
@@ -203,7 +223,7 @@ Ngoài ra `ARCHITECTURE.md` được sửa lại: đảo đúng chiều 6 thông
 
 ## 🚀 Chuẩn bị publish
 
-Đã đóng gói: **`dwg-previewer-1.0.1.vsix`** — 194 files, 3.09 MB.
+Đã đóng gói: **`dwg-previewer-1.0.3.vsix`** — 194 files, 3.09 MB.
 
 Trang public lấy từ `MARKETPLACE.md` (qua `--readme-path`), `README.md` giữ làm tài liệu nội bộ.
 
@@ -239,14 +259,17 @@ markdown-dwg-previewer/
 │   ├── make-icon.py          ← script sinh icon.png
 │   ├── preview-32.png        ← xem trước cỡ sidebar
 │   └── preview-64.png
-├── test/                     ← 48 unit test, không ship
+├── scripts/                  ← không ship
+│   └── preview.ts            ← chụp UI thật bằng Chromium headless
+├── test/                     ← 66 unit test, không ship
 │   ├── matrix.test.ts
 │   ├── bulge.test.ts
 │   ├── spline.test.ts
 │   ├── viewport.test.ts
 │   ├── hatch.test.ts
 │   ├── renderer.test.ts
-│   ├── corpus.ts             ← harness chạy cả thư mục .dwg
+│   ├── format.test.ts
+│   ├── corpus.ts             ← harness chạy cả thư mục .dwg/.dxf
 │   └── corpus-baseline.json  ← mốc regression (nên commit)
 └── src/
     ├── extension.ts
@@ -279,7 +302,7 @@ npm install          # Cài dependencies
 npm run build        # Build extension + webview
 npm run watch        # Watch mode
 npm run typecheck    # TypeScript check
-npm test             # 48 unit test (node:test, không cần dependency ngoài)
+npm test             # 66 unit test (node:test, không cần dependency ngoài)
 
 # Corpus test — chạy pipeline thật trên cả thư mục .dwg
 npm run test:corpus -- /đường/dẫn/tới/thư-mục          # đối chiếu baseline
@@ -295,7 +318,27 @@ Xem log convert: **View → Output → chọn "DWG Previewer"** trong dropdown.
 
 ## 📝 Changelog
 
-### 2026-08-12 — 11:32 · Code review & đóng gói
+### 2026-08-12 — 15:45 · v1.0.3 · Cải thiện UI/UX
+- **Empty state** — canvas trống giờ luôn nói rõ lý do; sửa lỗi P0 mà corpus test đã phát hiện (bản vẽ 3D mở ra đen trơn không một lời giải thích)
+- **Thanh trạng thái** — toạ độ, mức zoom, số object, gợi ý thao tác (giải quyết việc double-click = fit trước đây không ai biết)
+- **Nút zoom −/+/Fit** trên toolbar
+- **Lọc layer + nút isolate** cho bản vẽ nhiều layer
+- Kéo bằng chuột giữa; con trỏ đổi thành `grabbing` khi kéo
+- Thêm `scripts/preview.ts` — chụp UI thật bằng Chromium headless
+- Sửa bug `[hidden]` bị `display: flex` đè, do preview harness phát hiện
+- Thêm 7 test cho phần toán zoom (tổng 66)
+
+### 2026-08-12 — 13:30 · v1.0.2 · Hỗ trợ file DXF
+- Mở được trực tiếp file `.dxf`, **bỏ qua hoàn toàn bước convert** — DXF vốn là định dạng trung gian của extension
+- `src/dwg/format.ts` — nhận diện định dạng bằng header, không tin phần mở rộng
+- DXF nhị phân / file lạ báo lỗi rõ ràng kèm cách khắc phục thay vì mở ra trắng
+- displayName → "AutoCAD DWG & DXF Previewer", thêm keyword `dxf` / `dxf viewer`
+- Thêm 11 unit test cho phần nhận diện (tổng 59)
+- Corpus harness nhận cả `.dxf`; kiểm chứng 17 file DXF cho entity count khớp tuyệt đối với đường DWG
+- Thêm dòng miễn trừ nhãn hiệu Autodesk trên trang Marketplace
+- Đóng gói `dwg-previewer-1.0.2.vsix`
+
+### 2026-08-12 — 11:32 · v1.0.1 · Code review & đóng gói
 - Fix 11 vấn đề từ đợt rà soát code (xem bảng [Code review & fix](#-code-review--fix-2026-08-12))
 - Thêm `src/shared/types.ts` — gộp type wire format về một nguồn duy nhất
 - Thêm OutputChannel "DWG Previewer" — log toàn bộ quá trình convert

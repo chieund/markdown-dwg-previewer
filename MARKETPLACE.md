@@ -1,6 +1,6 @@
-# DWG Previewer — View AutoCAD DWG Files in VS Code
+# AutoCAD DWG & DXF Previewer for VS Code
 
-**Open any `.dwg` drawing straight in VS Code. No AutoCAD. No license. No conversion step.**
+**Open any `.dwg` or `.dxf` drawing straight in VS Code. No AutoCAD. No license. No conversion step.**
 
 Someone sends you a DWG file. You don't have AutoCAD — or you do, but launching it just to
 glance at a floor plan is absurd. Install this extension, double-click the file, and the
@@ -13,8 +13,9 @@ Works fully offline on Windows, macOS and Linux. Your drawings never leave your 
 
 ## Why people install it
 
-**You received a DWG and can't open it.** No AutoCAD license, no trial signup, no sketchy
-"free online DWG viewer" that wants you to upload a client's floor plan to a random server.
+**You received a DWG or DXF and can't open it.** No AutoCAD license, no trial signup, no
+sketchy "free online DWG viewer" that wants you to upload a client's floor plan to a random
+server.
 
 **Your repository contains CAD files.** Site plans, panel layouts, machine drawings — review
 them during a pull request without leaving the editor or asking someone to export a PDF.
@@ -29,7 +30,9 @@ next to the code that parses them.
 
 ## What you get
 
-- **Instant preview** — double-click a `.dwg` file, that's the whole workflow
+- **Instant preview** — double-click a `.dwg` or `.dxf` file, that's the whole workflow
+- **DXF opens with no conversion at all** — DXF is the format this extension reads natively,
+  so those files skip straight to rendering
 - **Pan and zoom** — scroll to zoom toward the cursor, drag to pan, double-click to fit
 - **Layer control** — show or hide any layer, with an entity count for each
 - **Multi-sheet drawings** — switch between Model Space and every Paper Space layout
@@ -43,8 +46,8 @@ next to the code that parses them.
 
 ## Quick start
 
-1. Install **DWG Previewer**
-2. Open a `.dwg` file
+1. Install the extension
+2. Open a `.dwg` or `.dxf` file
 3. There is no step 3
 
 Nothing to configure. No converter to install. No account.
@@ -66,7 +69,13 @@ No — this is a viewer. Your files are opened read-only and are never modified.
 Never. Everything runs locally inside VS Code, and it works with no internet connection.
 
 **Does it work with DXF files?**
-Not yet — `.dwg` only for now.
+Yes. `.dxf` files open directly and skip the conversion step entirely, so they load faster
+than DWG. ASCII DXF is supported; binary DXF is not, and says so clearly instead of opening
+blank.
+
+**What if a file has the wrong extension?**
+The format is detected from the file's own header, not its name, so a DWG saved as `.dxf`
+still opens correctly.
 
 **Is 3D supported?**
 This is a 2D viewer. 3D drawings open, but solids are not rendered; 3DFACE geometry appears
@@ -106,3 +115,9 @@ external converter for unusual files — almost nobody needs it.
 Open **View → Output** and select **DWG Previewer** to see exactly what happened during
 conversion, then open an issue on the repository with that log and, if you can share it,
 the drawing.
+
+---
+
+*Not affiliated with, endorsed by, or sponsored by Autodesk. AutoCAD, DWG and DXF are
+trademarks of Autodesk, Inc., used here only to describe the file formats this extension
+reads.*

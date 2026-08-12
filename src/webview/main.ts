@@ -1,5 +1,13 @@
 import { Bounds, DxfPage, SVG_NS, ViewportView, renderEntity } from './renderer';
-import { ViewBox, applyViewBox, attachPanZoom, getViewBox } from './panZoom';
+import {
+  BUTTON_STEP,
+  ViewBox,
+  applyViewBox,
+  attachPanZoom,
+  clientToViewBox,
+  getViewBox,
+  zoomCentre,
+} from './panZoom';
 import { toPngBase64, toStandaloneSvg } from './export';
 
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void };
@@ -11,6 +19,7 @@ interface Scene {
   pages: DxfPage[];
   hiddenLayers: Set<string>;
   pageIndex: number;
+  skippedEntityTypes: string[];
 }
 
 let scene: Scene | null = null;
@@ -22,6 +31,13 @@ let disposeActivePanZoom: (() => void) | null = null;
 let renderGeneration = 0;
 /** Dispose function for the document-level click listener on the layer panel. */
 let disposeLayerOutsideClick: (() => void) | null = null;
+/** The fitted view of the current page — zoom is reported relative to it. */
+let fittedView: ViewBox | null = null;
+/** Last known cursor position in drawing coordinates, for the status bar. */
+let cursorPoint: { x: number; y: number } | null = null;
+let statusBar: HTMLElement | null = null;
+let visibleEntityCount = 0;
+let pageSelect: HTMLSelectElement | null = null;
 
 function fitBounds(bounds: Bounds): ViewBox {
   const width = bounds.maxX - bounds.minX || 1;
@@ -118,8 +134,182 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
   activeSvg = svg;
 
   const fitted = page.bounds ? fitBounds(page.bounds) : EMPTY_VIEW;
+  fittedView = fitted;
+  visibleEntityCount = visibleEntities.length + countVisibleViewportEntities(page, hiddenLayers);
+
   applyViewBox(svg, previousView ?? fitted);
-  disposeActivePanZoom = attachPanZoom(svg, () => applyViewBox(svg, fitted));
+  disposeActivePanZoom = attachPanZoom(svg, () => applyViewBox(svg, fitted), updateStatusBar);
+
+  svg.addEventListener('mousemove', (event) => {
+    const point = clientToViewBox(svg, event.clientX, event.clientY);
+    // The scene is drawn through a scale(1,-1) flip, so undo it for display.
+    cursorPoint = { x: point.x, y: -point.y };
+    updateStatusBar();
+  });
+  svg.addEventListener('mouseleave', () => {
+    cursorPoint = null;
+    updateStatusBar();
+  });
+
+  // Nothing on screen must never be a bare rectangle — say why it is empty.
+  if (visibleEntityCount === 0) {
+    host.appendChild(buildEmptyState(page, hiddenLayers));
+  }
+
+  updateStatusBar();
+}
+
+function countVisibleViewportEntities(page: DxfPage, hiddenLayers: Set<string>): number {
+  return (page.viewports ?? []).reduce(
+    (total, view) => total + view.entities.filter((e) => !hiddenLayers.has(e.layer)).length,
+    0
+  );
+}
+
+/**
+ * Explains an empty canvas.
+ *
+ * A drawing can come up blank for two very different reasons, and the fix
+ * differs: either the user switched every layer off, or the sheet genuinely
+ * holds nothing a 2D viewer can draw — which is what happens with 3D models.
+ * Showing a bare rectangle for either one reads as a broken extension.
+ */
+function buildEmptyState(page: DxfPage, hiddenLayers: Set<string>): HTMLElement {
+  const totalOnPage =
+    page.entities.length +
+    (page.viewports ?? []).reduce((total, view) => total + view.entities.length, 0);
+
+  const box = document.createElement('div');
+  box.className = 'dwg-empty';
+
+  const title = document.createElement('div');
+  title.className = 'dwg-empty-title';
+  const detail = document.createElement('div');
+  detail.className = 'dwg-empty-detail';
+  box.append(title, detail);
+
+  if (totalOnPage > 0) {
+    const hiddenCount = page.layers.filter((l) => hiddenLayers.has(l.name)).length;
+    title.textContent = 'Every layer on this sheet is hidden';
+    detail.textContent =
+      `${hiddenCount} of ${page.layers.length} layers are switched off, ` +
+      `which hides all ${totalOnPage.toLocaleString()} objects here.`;
+
+    const action = document.createElement('button');
+    action.className = 'dwg-empty-action';
+    action.textContent = 'Show all layers';
+    action.addEventListener('click', () => {
+      for (const layer of page.layers) hiddenLayers.delete(layer.name);
+      refreshLayerControl();
+      redraw(true);
+    });
+    box.appendChild(action);
+    return box;
+  }
+
+  title.textContent = 'Nothing to draw on this sheet';
+  const skipped = scene?.skippedEntityTypes ?? [];
+  detail.textContent = skipped.length
+    ? `This sheet holds no 2D geometry this viewer can draw. It uses: ${skipped.join(', ')}.`
+    : 'This sheet holds no 2D geometry. Drawings built from 3D solids, meshes or ' +
+      'surfaces have nothing for a 2D viewer to show. Open View → Output and pick ' +
+      '"DWG Previewer" to see what was read from the file.';
+
+  const elsewhere = scene?.pages.findIndex(
+    (candidate, index) => index !== scene!.pageIndex && candidate.entities.length > 0
+  );
+  if (elsewhere !== undefined && elsewhere >= 0) {
+    const action = document.createElement('button');
+    action.className = 'dwg-empty-action';
+    action.textContent = `Open "${scene!.pages[elsewhere].name}" instead`;
+    action.addEventListener('click', () => goToPage(elsewhere));
+    box.appendChild(action);
+  }
+
+  return box;
+}
+
+function goToPage(index: number): void {
+  if (!scene) return;
+  scene.pageIndex = index;
+  if (pageSelect) pageSelect.value = String(index);
+  refreshLayerControl();
+  redraw(false);
+}
+
+function buildZoomControls(): HTMLElement {
+  const group = document.createElement('div');
+  group.className = 'dwg-zoom';
+
+  const add = (label: string, title: string, run: () => void) => {
+    const button = document.createElement('button');
+    button.className = 'dwg-zoom-button';
+    button.textContent = label;
+    button.title = title;
+    button.addEventListener('click', run);
+    group.appendChild(button);
+  };
+
+  // A smaller viewBox means a closer view, so zooming in divides.
+  add('−', 'Zoom out', () => {
+    if (!activeSvg) return;
+    zoomCentre(activeSvg, BUTTON_STEP);
+    updateStatusBar();
+  });
+  add('+', 'Zoom in', () => {
+    if (!activeSvg) return;
+    zoomCentre(activeSvg, 1 / BUTTON_STEP);
+    updateStatusBar();
+  });
+  add('Fit', 'Fit the drawing to the view — the same as double-clicking it', () => {
+    if (!activeSvg || !fittedView) return;
+    applyViewBox(activeSvg, fittedView);
+    updateStatusBar();
+  });
+
+  return group;
+}
+
+function buildStatusBar(): HTMLElement {
+  const bar = document.createElement('div');
+  bar.className = 'dwg-statusbar';
+  statusBar = bar;
+  return bar;
+}
+
+/** Drawing units span a huge range, so the precision follows the magnitude. */
+function formatCoord(value: number): string {
+  const magnitude = Math.abs(value);
+  if (magnitude >= 10000) return value.toFixed(0);
+  if (magnitude >= 1) return value.toFixed(2);
+  return value.toFixed(4);
+}
+
+function updateStatusBar(): void {
+  if (!statusBar) return;
+
+  const span = (text: string, className = '') => {
+    const el = document.createElement('span');
+    if (className) el.className = className;
+    el.textContent = text;
+    return el;
+  };
+
+  statusBar.textContent = '';
+  statusBar.appendChild(
+    span(cursorPoint ? `X ${formatCoord(cursorPoint.x)}   Y ${formatCoord(cursorPoint.y)}` : 'X —   Y —')
+  );
+
+  if (activeSvg && fittedView) {
+    // 100% is the whole drawing on screen, which is the only reference a
+    // viewer has without knowing the paper size it will be printed at.
+    const zoom = (fittedView.w / getViewBox(activeSvg).w) * 100;
+    statusBar.appendChild(span(`Zoom ${zoom >= 10 ? zoom.toFixed(0) : zoom.toFixed(1)}%`));
+  }
+
+  statusBar.appendChild(span(`${visibleEntityCount.toLocaleString()} objects`));
+  statusBar.appendChild(span('', 'dwg-status-spacer'));
+  statusBar.appendChild(span('Scroll = zoom · Drag = pan · Double-click = fit', 'dwg-status-hint'));
 }
 
 let clipCounter = 0;
@@ -177,11 +367,8 @@ function buildPageSelect(scene: Scene): HTMLElement | null {
     option.textContent = page.name;
     select.appendChild(option);
   });
-  select.addEventListener('change', () => {
-    scene.pageIndex = Number(select.value);
-    refreshLayerControl();
-    redraw(false);
-  });
+  select.addEventListener('change', () => goToPage(Number(select.value)));
+  pageSelect = select;
   return select;
 }
 
@@ -216,16 +403,39 @@ function buildLayerControl(scene: Scene): HTMLElement | null {
     button.textContent = `Layers ${layers.length - hidden}/${layers.length}`;
   };
 
+  // A real drawing can carry over a hundred layers, so the list needs a way in
+  // other than scrolling it.
+  const filter = document.createElement('input');
+  filter.type = 'search';
+  filter.className = 'dwg-layer-filter';
+  filter.placeholder = `Filter ${layers.length} layers…`;
+  panel.appendChild(filter);
+
   const actions = document.createElement('div');
   actions.className = 'dwg-layer-actions';
-  const checkboxes: HTMLInputElement[] = [];
+  const checkboxes = new Map<string, HTMLInputElement>();
+  const rows = new Map<string, HTMLElement>();
+  let matching = layers;
 
+  const syncCheckboxes = () => {
+    for (const [name, box] of checkboxes) box.checked = !scene.hiddenLayers.has(name);
+  };
+
+  /** Show/Hide All act on what the filter has narrowed the list down to. */
   const setAll = (visible: boolean) => {
-    for (const layer of layers) {
+    for (const layer of matching) {
       if (visible) scene.hiddenLayers.delete(layer.name);
       else scene.hiddenLayers.add(layer.name);
     }
-    for (const box of checkboxes) box.checked = visible;
+    syncCheckboxes();
+    updateButton();
+    redraw(true);
+  };
+
+  const isolate = (name: string) => {
+    for (const layer of layers) scene.hiddenLayers.add(layer.name);
+    scene.hiddenLayers.delete(name);
+    syncCheckboxes();
     updateButton();
     redraw(true);
   };
@@ -243,8 +453,11 @@ function buildLayerControl(scene: Scene): HTMLElement | null {
   panel.appendChild(actions);
 
   for (const layer of layers) {
-    const row = document.createElement('label');
+    const row = document.createElement('div');
     row.className = 'dwg-layer-row';
+
+    const label = document.createElement('label');
+    label.className = 'dwg-layer-label';
 
     const box = document.createElement('input');
     box.type = 'checkbox';
@@ -255,7 +468,7 @@ function buildLayerControl(scene: Scene): HTMLElement | null {
       updateButton();
       redraw(true);
     });
-    checkboxes.push(box);
+    checkboxes.set(layer.name, box);
 
     const swatch = document.createElement('span');
     swatch.className = 'dwg-layer-swatch';
@@ -266,13 +479,36 @@ function buildLayerControl(scene: Scene): HTMLElement | null {
     name.textContent = layer.name;
     name.title = layer.name;
 
+    label.append(box, swatch, name);
+
     const count = document.createElement('span');
     count.className = 'dwg-layer-count';
     count.textContent = String(layer.entityCount);
 
-    row.append(box, swatch, name, count);
+    const only = document.createElement('button');
+    only.className = 'dwg-layer-isolate';
+    only.textContent = 'only';
+    only.title = `Show only "${layer.name}"`;
+    only.addEventListener('click', () => isolate(layer.name));
+
+    row.append(label, count, only);
+    rows.set(layer.name, row);
     panel.appendChild(row);
   }
+
+  const noMatch = document.createElement('div');
+  noMatch.className = 'dwg-layer-nomatch';
+  noMatch.textContent = 'No layer matches that name';
+  noMatch.hidden = true;
+  panel.appendChild(noMatch);
+
+  filter.addEventListener('input', () => {
+    const query = filter.value.trim().toLowerCase();
+    matching = query ? layers.filter((l) => l.name.toLowerCase().includes(query)) : layers;
+    const visible = new Set(matching.map((l) => l.name));
+    for (const [name, row] of rows) row.hidden = !visible.has(name);
+    noMatch.hidden = matching.length > 0;
+  });
 
   button.addEventListener('click', () => {
     panel.hidden = !panel.hidden;
@@ -337,8 +573,12 @@ function buildSkippedBanner(skippedEntityTypes: string[]): HTMLElement | null {
 }
 
 function renderScene(pages: DxfPage[], skippedEntityTypes: string[]) {
-  scene = { pages, hiddenLayers: new Set(), pageIndex: 0 };
+  scene = { pages, hiddenLayers: new Set(), pageIndex: 0, skippedEntityTypes };
   activeSvg = null;
+  pageSelect = null;
+  statusBar = null;
+  cursorPoint = null;
+  fittedView = null;
   root.innerHTML = '';
 
   const toolbar = document.createElement('div');
@@ -350,6 +590,7 @@ function renderScene(pages: DxfPage[], skippedEntityTypes: string[]) {
   for (const control of [
     buildPageSelect(scene),
     layerSlot,
+    buildZoomControls(),
     buildExportControls(),
     buildSkippedBanner(skippedEntityTypes),
   ]) {
@@ -361,6 +602,7 @@ function renderScene(pages: DxfPage[], skippedEntityTypes: string[]) {
 
   root.appendChild(toolbar);
   root.appendChild(canvasHost);
+  root.appendChild(buildStatusBar());
   refreshLayerControl();
   redraw(false);
 }

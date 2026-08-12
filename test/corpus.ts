@@ -17,10 +17,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { convertDwgToDxf, setConverterLogger } from '../src/dwg/converter';
+import { describeUnreadableFormat, detectDrawingFormat } from '../src/dwg/format';
 import { parseDxf } from '../src/dxf/parseDxf';
 
 interface FileResult {
   file: string;
+  format?: string;
   sizeKB: number;
   ok: boolean;
   error?: string;
@@ -36,12 +38,12 @@ interface FileResult {
 
 const BASELINE = path.resolve(__dirname, '..', 'test', 'corpus-baseline.json');
 
-function findDwgFiles(dir: string): string[] {
+function findDrawings(dir: string): string[] {
   const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...findDwgFiles(full));
-    else if (entry.name.toLowerCase().endsWith('.dwg')) out.push(full);
+    if (entry.isDirectory()) out.push(...findDrawings(full));
+    else if (/\.(dwg|dxf)$/i.test(entry.name)) out.push(full);
   }
   return out.sort();
 }
@@ -53,8 +55,19 @@ async function runFile(filePath: string, logLines: string[]): Promise<FileResult
   try {
     const buffer = fs.readFileSync(filePath);
 
+    // Mirrors dwgEditorProvider: a DXF skips conversion and goes straight in.
+    const format = detectDrawingFormat(buffer);
+    result.format = format;
+
     const convertStart = Date.now();
-    const dxf = await convertDwgToDxf(buffer, filePath, '');
+    let dxf: string;
+    if (format === 'dxf-text') {
+      dxf = buffer.toString('utf-8');
+    } else if (format === 'dwg') {
+      dxf = await convertDwgToDxf(buffer, filePath, '');
+    } else {
+      throw new Error(describeUnreadableFormat(format, path.basename(filePath)).split('\n')[0]);
+    }
     result.convertMs = Date.now() - convertStart;
     result.dxfKB = Math.round(dxf.length / 1024);
 
@@ -80,20 +93,21 @@ const padL = (s: string, n: number) => s.padStart(n);
 
 function printTable(results: FileResult[]): void {
   const header =
-    pad('File', 46) + padL('Size', 8) + padL('DXF', 8) + padL('Conv', 8) +
+    pad('File', 46) + padL('Fmt', 10) + padL('Size', 8) + padL('DXF', 8) + padL('Conv', 8) +
     padL('Parse', 8) + padL('Pages', 7) + padL('Entities', 10) + padL('Layers', 8) + '  Status';
   console.log('\n' + header);
   console.log('─'.repeat(header.length));
 
   for (const r of results) {
     if (!r.ok) {
-      console.log(pad(r.file, 46) + padL(`${r.sizeKB}K`, 8) + padL('—', 8) + padL('—', 8) +
+      console.log(pad(r.file, 46) + padL(r.format ?? '—', 10) + padL(`${r.sizeKB}K`, 8) + padL('—', 8) + padL('—', 8) +
         padL('—', 8) + padL('—', 7) + padL('—', 10) + padL('—', 8) + '  FAIL');
       console.log(' '.repeat(4) + '↳ ' + r.error);
       continue;
     }
     console.log(
       pad(r.file, 46) +
+      padL(r.format ?? '—', 10) +
       padL(`${r.sizeKB}K`, 8) +
       padL(`${r.dxfKB}K`, 8) +
       padL(`${r.convertMs}ms`, 8) +
@@ -182,16 +196,16 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const files = findDwgFiles(dir);
+  const files = findDrawings(dir);
   if (files.length === 0) {
-    console.error(`Không tìm thấy file .dwg nào trong ${dir}`);
+    console.error(`Không tìm thấy file .dwg / .dxf nào trong ${dir}`);
     process.exit(2);
   }
 
   const logLines: string[] = [];
   setConverterLogger((msg) => logLines.push(msg));
 
-  console.log(`Chạy ${files.length} file .dwg từ ${dir}`);
+  console.log(`Chạy ${files.length} bản vẽ từ ${dir}`);
 
   const results: FileResult[] = [];
   for (const file of files) {

@@ -1,14 +1,16 @@
 {
   "name": "dwg-previewer",
-  "displayName": "DWG Previewer",
-  "description": "View AutoCAD DWG drawings inside VS Code — no AutoCAD needed. Open .dwg files instantly with pan, zoom, layer control and SVG/PNG export.",
-  "version": "1.0.1",
+  "displayName": "AutoCAD DWG & DXF Previewer",
+  "description": "View AutoCAD DWG and DXF drawings inside VS Code — no AutoCAD needed. Open .dwg and .dxf files instantly with pan, zoom, layer control and SVG/PNG export.",
+  "version": "1.0.3",
   "publisher": "bumkom",
   "license": "MIT",
   "icon": "icon.png",
   "keywords": [
     "dwg",
+    "dxf",
     "dwg viewer",
+    "dxf viewer",
     "dwg preview",
     "autocad",
     "cad",
@@ -37,10 +39,13 @@
     "customEditors": [
       {
         "viewType": "dwgPreviewer.dwgView",
-        "displayName": "DWG Preview",
+        "displayName": "DWG / DXF Preview",
         "selector": [
           {
             "filenamePattern": "*.dwg"
+          },
+          {
+            "filenamePattern": "*.dxf"
           }
         ],
         "priority": "default"
@@ -65,7 +70,8 @@
     "test:corpus": "node esbuild.js --corpus && node out-test/corpus.js",
     "package": "vsce package --readme-path MARKETPLACE.md",
     "publish": "vsce publish --readme-path MARKETPLACE.md",
-    "vscode:prepublish": "npm run build"
+    "vscode:prepublish": "npm run build",
+    "preview": "node esbuild.js && node esbuild.js --preview && node out-test/preview.js"
   },
   "dependencies": {
     "@mlightcad/libdxfrw-web": "0.0.9",

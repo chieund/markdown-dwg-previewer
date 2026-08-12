@@ -34,9 +34,24 @@ const corpusConfig = {
   sourcemap: true,
 };
 
+// Preview harness — renders the real webview to a PNG via headless Chromium.
+const previewConfig = {
+  entryPoints: ['scripts/preview.ts'],
+  bundle: true,
+  outfile: 'out-test/preview.js',
+  platform: 'node',
+  format: 'cjs',
+  external: ['vscode', '@mlightcad/libdxfrw-web', '@mlightcad/libredwg-web'],
+  sourcemap: true,
+};
+
 async function run() {
   if (process.argv.includes('--corpus')) {
     await esbuild.build(corpusConfig);
+    return;
+  }
+  if (process.argv.includes('--preview')) {
+    await esbuild.build(previewConfig);
     return;
   }
   if (watch) {
