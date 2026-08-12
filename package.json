@@ -1,0 +1,72 @@
+{
+  "name": "dwg-previewer",
+  "displayName": "DWG Previewer",
+  "description": "Preview 2D AutoCAD DWG drawings directly in VS Code — converts DWG to DXF internally and renders as SVG.",
+  "version": "1.0.0",
+  "publisher": "bumkom",
+  "license": "MIT",
+  "icon": "icon.png",
+  "keywords": [
+    "dwg",
+    "autocad",
+    "cad",
+    "drawing",
+    "preview"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chieund/markdown-dwg-previewer"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "dwgPreviewer.dwgView",
+        "displayName": "DWG Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.dwg"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "configuration": {
+      "title": "DWG Previewer",
+      "properties": {
+        "dwgPreviewer.converterPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to dwg2dxf or ODAFileConverter executable. Leave empty to use the bundled WASM converter."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "typecheck": "tsc --noEmit",
+    "package": "vsce package",
+    "publish": "vsce publish",
+    "vscode:prepublish": "npm run build"
+  },
+  "dependencies": {
+    "@mlightcad/libdxfrw-web": "0.0.9",
+    "@mlightcad/libredwg-web": "^0.7.9"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.0",
+    "dxf-parser": "^1.1.2",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  }
+}

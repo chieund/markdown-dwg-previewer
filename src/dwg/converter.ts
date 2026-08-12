@@ -1,0 +1,227 @@
+/**
+ * DWG → DXF Conversion Module
+ *
+ * Primary: Uses @mlightcad/libredwg-web (WebAssembly, GNU LibreDWG) to convert
+ * DWG → DXF entirely in-process. No external tool installation required.
+ * Supports AutoCAD R14 through 2020+.
+ *
+ * Fallback: @mlightcad/libdxfrw-web (lighter WASM, works for simpler files).
+ *
+ * Last resort: External CLI tool (dwg2dxf or ODA File Converter) if configured.
+ */
+
+import * as path from 'path';
+import { execFile } from 'child_process';
+import { promises as fs } from 'fs';
+import * as os from 'os';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
+
+// Lazy-loaded WASM modules
+let libredwgModule: any = null;
+let libdxfrwModule: any = null;
+
+/**
+ * Loads the libredwg WASM module (GNU LibreDWG — most capable parser).
+ * Uses dynamic import() since the WASM JS file is ESM.
+ */
+async function getLibredwgModule(): Promise<any> {
+  if (libredwgModule) return libredwgModule;
+  try {
+    const wasmPath = path.resolve(__dirname, '..', 'node_modules', '@mlightcad', 'libredwg-web', 'wasm', 'libredwg-web.js');
+    const { default: createModule } = await import(wasmPath);
+    libredwgModule = await createModule();
+    return libredwgModule;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Loads the libdxfrw WASM module (lighter, fallback).
+ */
+async function getLibdxfrwModule(): Promise<any> {
+  if (libdxfrwModule) return libdxfrwModule;
+  try {
+    const createModule = require('@mlightcad/libdxfrw-web/dist/libdxfrw.js');
+    libdxfrwModule = await createModule();
+    return libdxfrwModule;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Primary converter: GNU LibreDWG via WASM.
+ * Uses dwg_write_dxf() — the same function as the CLI `dwg2dxf` tool,
+ * but compiled to WebAssembly. Handles complex/large DWG files.
+ */
+async function convertWithLibredwg(dwgBuffer: Buffer): Promise<string | null> {
+  const libredwg = await getLibredwgModule();
+  if (!libredwg || !libredwg.dwg_write_dxf) return null;
+
+  try {
+    // Write DWG to virtual filesystem
+    libredwg.FS.writeFile('/input.dwg', new Uint8Array(dwgBuffer));
+
+    // Convert DWG → DXF using LibreDWG's built-in converter
+    const result = libredwg.dwg_write_dxf('/input.dwg', '/output.dxf');
+
+    if (result !== 0) {
+      // Non-zero can still succeed (warnings), check if output exists
+      try {
+        libredwg.FS.stat('/output.dxf');
+      } catch {
+        return null;
+      }
+    }
+
+    // Read DXF from virtual filesystem
+    const dxfContent = libredwg.FS.readFile('/output.dxf', { encoding: 'utf8' });
+
+    if (!dxfContent || !dxfContent.trim()) {
+      return null;
+    }
+
+    return dxfContent;
+  } catch {
+    return null;
+  } finally {
+    try { libredwg.FS.unlink('/input.dwg'); } catch { /* ignore */ }
+    try { libredwg.FS.unlink('/output.dxf'); } catch { /* ignore */ }
+  }
+}
+
+/**
+ * Secondary converter: libdxfrw via WASM.
+ * Lighter weight, works for many DWG files but fails on complex ones.
+ */
+async function convertWithLibdxfrw(dwgBuffer: Buffer): Promise<string | null> {
+  const libdxfrw = await getLibdxfrwModule();
+  if (!libdxfrw) return null;
+
+  let database: any = null;
+  let fileHandler: any = null;
+  let dwg: any = null;
+
+  try {
+    database = new libdxfrw.DRW_Database();
+    fileHandler = new libdxfrw.DRW_FileHandler();
+    fileHandler.database = database;
+
+    const uint8 = new Uint8Array(dwgBuffer);
+    dwg = new libdxfrw.DRW_DwgR(uint8);
+
+    if (!dwg.read(fileHandler, false)) return null;
+
+    const dxfContent = fileHandler.fileExport(
+      libdxfrw.DRW_Version.AC1021, false, database, false
+    );
+
+    return (dxfContent && dxfContent.trim()) ? dxfContent : null;
+  } catch {
+    return null;
+  } finally {
+    try { dwg?.delete(); } catch { /* ignore */ }
+    try { fileHandler?.delete(); } catch { /* ignore */ }
+    try { database?.delete(); } catch { /* ignore */ }
+  }
+}
+
+/**
+ * Converts a DWG buffer to DXF text.
+ *
+ * Strategy (all bundled, zero-install):
+ * 1. libredwg-web WASM (GNU LibreDWG — handles all DWG files)
+ * 2. libdxfrw-web WASM (fallback for edge cases)
+ * 3. External CLI tool (if user configured one)
+ */
+export async function convertDwgToDxf(
+  dwgBuffer: Buffer,
+  dwgPath: string,
+  converterPath: string
+): Promise<string> {
+  // If user explicitly configured a CLI tool, use it directly
+  if (converterPath) {
+    return convertWithCli(dwgBuffer, dwgPath, converterPath);
+  }
+
+  // Try libredwg-web first (most capable, handles large/complex files)
+  const libredwgResult = await convertWithLibredwg(dwgBuffer);
+  if (libredwgResult) return libredwgResult;
+
+  // Fall back to libdxfrw-web (lighter, sometimes works when libredwg doesn't)
+  const libdxfrwResult = await convertWithLibdxfrw(dwgBuffer);
+  if (libdxfrwResult) return libdxfrwResult;
+
+  // Last resort: CLI tool on PATH
+  const tool = await findConverter();
+  if (tool) return convertWithCli(dwgBuffer, dwgPath, tool);
+
+  throw new Error(
+    'Failed to convert DWG file.\n\n' +
+      'The bundled converters could not process this file.\n\n' +
+      'You can install an external converter as fallback:\n' +
+      '  • LibreDWG (provides dwg2dxf): sudo apt install libredwg-utils\n' +
+      '  • ODA File Converter: https://www.opendesign.com/guestfiles/oda_file_converter\n\n' +
+      'Or set "dwgPreviewer.converterPath" in VS Code settings.'
+  );
+}
+
+/**
+ * Converts using an external CLI tool.
+ */
+async function convertWithCli(dwgBuffer: Buffer, dwgPath: string, tool: string): Promise<string> {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dwg-preview-'));
+  const baseName = path.basename(dwgPath, '.dwg');
+  const tmpDwg = path.join(tmpDir, `${baseName}.dwg`);
+  const tmpDxf = path.join(tmpDir, `${baseName}.dxf`);
+
+  try {
+    await fs.writeFile(tmpDwg, dwgBuffer);
+    const toolName = path.basename(tool).toLowerCase();
+    if (toolName.includes('odafileconverter')) {
+      await execFileAsync(tool, [tmpDir, tmpDir, 'ACAD2018', 'DXF', '0', '1'], { timeout: 120_000, maxBuffer: 50 * 1024 * 1024 });
+    } else {
+      try {
+        await execFileAsync(tool, [tmpDwg, '-o', tmpDxf], { timeout: 60_000, maxBuffer: 50 * 1024 * 1024 });
+      } catch { /* dwg2dxf may warn but still produce output */ }
+    }
+    const dxfContent = await fs.readFile(tmpDxf, 'utf-8');
+    if (!dxfContent.trim()) throw new Error('Converter produced an empty DXF file.');
+    return dxfContent;
+  } finally {
+    await cleanupDir(tmpDir);
+  }
+}
+
+async function findConverter(): Promise<string | null> {
+  const candidates = ['dwg2dxf', 'ODAFileConverter', '/usr/local/bin/dwg2dxf', '/usr/bin/dwg2dxf'];
+  if (process.platform === 'win32') {
+    candidates.push('C:\\Program Files\\ODA\\ODAFileConverter\\ODAFileConverter.exe');
+  } else if (process.platform === 'darwin') {
+    candidates.push('/opt/homebrew/bin/dwg2dxf');
+  }
+  for (const c of candidates) {
+    if (await isExecutable(c)) return c;
+  }
+  return null;
+}
+
+async function isExecutable(filePath: string): Promise<boolean> {
+  if (!path.isAbsolute(filePath) && !filePath.includes(path.sep)) {
+    try {
+      await execFileAsync(process.platform === 'win32' ? 'where' : 'which', [filePath], { timeout: 5_000 });
+      return true;
+    } catch { return false; }
+  }
+  try { await fs.access(filePath, fs.constants.X_OK); return true; } catch { return false; }
+}
+
+async function cleanupDir(dirPath: string): Promise<void> {
+  try {
+    for (const entry of await fs.readdir(dirPath)) await fs.unlink(path.join(dirPath, entry)).catch(() => {});
+    await fs.rmdir(dirPath).catch(() => {});
+  } catch { /* best effort */ }
+}
