@@ -22,6 +22,7 @@ import {
   Matrix2D,
   applyToPoint,
   determinant,
+  extrusionMatrix,
   isSimilarity,
   multiply,
   rotate,
@@ -761,18 +762,25 @@ function expandInsert(
   const rows = Math.max(1, insert.rowCount ?? 1);
   const columnSpacing = insert.columnSpacing ?? 0;
   const rowSpacing = insert.rowSpacing ?? 0;
+  // A mirrored INSERT (AutoCAD's MIRROR command) tilts the OCS instead of
+  // touching the geometry, so its insertion point and rotation are expressed
+  // in that OCS rather than world coordinates — convert before using them.
+  const ocs = extrusionMatrix(insert.extrusionDirection);
 
   for (let column = 0; column < columns; column++) {
     for (let row = 0; row < rows; row++) {
       // Block space -> world: shift off the block's base point, scale, rotate,
-      // offset for the grid, then move to the insertion point.
+      // offset for the grid, move to the insertion point, then out of the OCS.
       const local = multiply(
-        translate(insert.position?.x ?? 0, insert.position?.y ?? 0),
+        ocs,
         multiply(
-          rotate(rotationRad),
+          translate(insert.position?.x ?? 0, insert.position?.y ?? 0),
           multiply(
-            translate(column * columnSpacing, row * rowSpacing),
-            multiply(scale(sx, sy), translate(-basePoint.x, -basePoint.y))
+            rotate(rotationRad),
+            multiply(
+              translate(column * columnSpacing, row * rowSpacing),
+              multiply(scale(sx, sy), translate(-basePoint.x, -basePoint.y))
+            )
           )
         )
       );

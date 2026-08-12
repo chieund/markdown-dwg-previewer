@@ -71,3 +71,45 @@ export function rotationAngle(m: Matrix2D): number {
 export function determinant(m: Matrix2D): number {
   return m.a * m.d - m.b * m.c;
 }
+
+interface Vector3D {
+  x: number;
+  y: number;
+  z: number;
+}
+
+function cross(a: Vector3D, b: Vector3D): Vector3D {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
+  };
+}
+
+function normalize(v: Vector3D): Vector3D {
+  const length = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  return { x: v.x / length, y: v.y / length, z: v.z / length };
+}
+
+/**
+ * OCS-to-WCS basis change for an entity's extrusion direction, via the DXF
+ * "arbitrary axis algorithm". AutoCAD's MIRROR command commonly leaves a
+ * block's geometry untouched and instead flips its INSERT's extrusion to
+ * (0,0,-1); the insertion point (10/20) and rotation (50) are then expressed
+ * in that tilted OCS, not world coordinates. Skipping this makes every
+ * mirrored INSERT land at the wrong position and angle. Z is dropped, in
+ * keeping with the rest of the renderer flattening everything to 2D.
+ */
+export function extrusionMatrix(extrusion: Vector3D | undefined): Matrix2D {
+  if (!extrusion) return IDENTITY;
+  const { x, y, z } = extrusion;
+  if (x === 0 && y === 0 && z === 1) return IDENTITY;
+
+  const n = normalize({ x, y, z });
+  const worldAxis: Vector3D =
+    Math.abs(n.x) < 1 / 64 && Math.abs(n.y) < 1 / 64 ? { x: 0, y: 1, z: 0 } : { x: 0, y: 0, z: 1 };
+  const ax = normalize(cross(worldAxis, n));
+  const ay = normalize(cross(n, ax));
+
+  return { a: ax.x, b: ax.y, c: ay.x, d: ay.y, e: 0, f: 0 };
+}

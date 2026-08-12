@@ -1,8 +1,10 @@
 # DWG Previewer — Tiến độ phát triển
 
-**Cập nhật lần cuối:** 2026-08-12 15:45
+**Cập nhật lần cuối:** 2026-08-12 15:55
 
-**Trạng thái:** đã đóng gói `dwg-previewer-1.0.3.vsix` (3.09 MB) — cải thiện UI/UX — sẵn sàng upload Marketplace, còn 3 việc cần xác nhận ở mục [Chuẩn bị publish](#-chuẩn-bị-publish)
+**Trạng thái:** đã đóng gói `dwg-previewer-1.0.3.vsix` (3.09 MB) — sẵn sàng upload Marketplace, còn 3 việc cần xác nhận ở mục [Chuẩn bị publish](#-chuẩn-bị-publish)
+
+**Đang mở:** `.dwg` và `.dxf` · **72 unit test** · **corpus 17/17** · typecheck sạch
 
 ---
 
@@ -58,7 +60,7 @@
 - [x] `viewport.ts` — viewport scanner + paper→model transform
 - [x] `bulge.ts` — polyline arc segment expansion
 - [x] `spline.ts` — B-spline de Boor sampling
-- [x] `matrix.ts` — 2D affine transforms (translate/rotate/scale/mirror)
+- [x] `matrix.ts` — 2D affine transforms (translate/rotate/scale/mirror) + `extrusionMatrix()` cho OCS
 - [x] `types.ts` — re-export từ `shared/types.ts` (giữ đường import cũ cho các file trong `dxf/`)
 
 ### 7. Webview Renderer (`src/webview/`)
@@ -89,7 +91,7 @@
 | Other | POINT · 3DFACE (wireframe) |
 
 ### 9. Unit test (`test/`)
-- [x] **66 test, chạy bằng `node:test`** — Node 20 có sẵn, không thêm dependency nào
+- [x] **72 test, chạy bằng `node:test`** — Node 20 có sẵn, không thêm dependency nào
 - [x] `matrix.test.ts` — compose/thứ tự nhân, similarity vs scale không đều, mirror qua dấu determinant
 - [x] `bulge.test.ts` — bulge 1 = nửa đường tròn, bulge âm đảo chiều, polyline đóng không lặp điểm đầu
 - [x] `spline.test.ts` — de Boor khớp Bézier tại điểm giữa, input hỏng trả về rỗng, curve nằm trong convex hull
@@ -98,6 +100,7 @@
 - [x] `renderer.test.ts` — cờ large-arc và sweep âm trong `arcToPathData`
 - [x] `format.test.ts` — nhận diện DWG/DXF/DXF nhị phân, BOM, comment 999, file đổi đuôi sai
 - [x] `panZoom.test.ts` — chiều zoom, giữ điểm neo khi zoom, ánh xạ toạ độ con trỏ
+- [x] `insert-ocs.test.ts` — ma trận OCS + hai test parse thật cho INSERT bị mirror (test parseDxf đầu tiên của dự án)
 - [x] **Đã mutation test** — cố tình phá 5 chỗ (đảo thứ tự `multiply`, đảo chiều bulge, bỏ cờ large-arc, lệch chỉ số knot, sai dấu twist), cả 5 đều bị test bắt
 
 ### 10. Preview harness (`scripts/preview.ts`)
@@ -115,38 +118,53 @@
 
 ### 12. User Features
 - [x] Zero-config — cài extension, mở file `.dwg` / `.dxf` = xem luôn
-- [x] Pan & zoom — scroll/drag/double-click
-- [x] Layer control — show/hide/show all/hide all
+- [x] Pan & zoom — cuộn chuột, kéo (trái hoặc giữa), double-click để fit
+- [x] Nút zoom `−` / `+` / `Fit` trên toolbar — không bắt buộc phải có bánh lăn
+- [x] Thanh trạng thái — toạ độ con trỏ, mức zoom, số object, gợi ý thao tác
+- [x] Layer control — show/hide, **lọc theo tên**, nút **isolate** từng layer
 - [x] Multi-page — Model Space + Paper Space sheets
+- [x] Empty state — canvas trống luôn tự giải thích, kèm nút hoàn tác
 - [x] Export SVG/PNG — save current view
 - [x] Live reload — file watcher auto-refresh
 - [x] Dark theme — matches VS Code
 
 ---
 
-## 📊 Performance (file 3.5MB / 45K entities)
+## 📊 Performance
 
-| Bước | Lần đầu | Lần 2+ (cache hit) |
-|------|---------|---------------------|
-| Load WASM | ~90ms | 0ms (module cached) |
-| DWG → DXF convert | ~1000ms | 0ms (result cached) |
-| Parse DXF | ~640ms | 0ms (result cached) |
-| Send to webview | ~100ms | ~100ms |
-| Render first paint | ~200ms | ~200ms |
-| Render full (progressive) | ~1.5s | ~1.5s |
-| **Total time-to-interactive** | **~2s** | **~300ms** |
+Số đo thật từ `npm run test:corpus` trên 17 bản vẽ mẫu của AutoCAD.
+
+| Bước | Đường DWG | Đường DXF |
+|------|-----------|-----------|
+| Đọc + convert | 14 – 562 ms | 0 – 13 ms (không cần convert) |
+| Parse | 5 – 6.812 ms | 5 – 1.499 ms |
+| Render first paint | ~200 ms | ~200 ms |
+| Render đầy đủ (progressive) | ~1,5 s với file lớn | như DWG |
+| Mở lại file không đổi | ~0 ms (cache theo path + mtime) | ~0 ms |
+
+File nặng nhất trong corpus — `colorwh.dwg`, 1,7 MB → DXF 9,2 MB → 36.431 entity:
+convert 562 ms, parse 6,8 s. Cùng nội dung đó nạp thẳng từ `.dxf` chỉ mất 1,5 s parse,
+vì bỏ được cả bước convert lẫn áp lực bộ nhớ mà WASM tạo ra.
+
+**6,8 s cho 36K entity là điểm bất thường** — file 45K entity của khách chỉ mất 640 ms.
+Nhiều khả năng do file này dày đặc HATCH. Đã đưa vào backlog.
 
 ---
 
 ## 📋 Test Results (2026-08-12)
 
-| File | Size | DXF Output | Entities | Layers | Blocks | Status |
-|------|------|-----------|----------|--------|--------|--------|
-| `Real-world drawing A` | 420KB | 2.8MB | 1,931 | 32 | 338 | ✅ |
-| `Real-world drawing B` | 455KB | 2.2MB | 1,135 | 42 | 22 | ✅ |
-| `Real-world drawing C` | 3,623KB | 18.5MB | 45,552 | 117 | 745 | ✅ |
+### Bản vẽ thật của khách
 
-Tất cả file test đều convert + parse + render thành công mà user **không cần cài tool nào**.
+| File | Size | DXF Output | Entities | Layers | INSERT bị mirror | Status |
+|------|------|-----------|----------|--------|------------------|--------|
+| `Real-world drawing A` | 420KB | 2.8MB | 1,931 | 32 | 4 / 304 | ✅ |
+| `Real-world drawing B` | 455KB | 2.2MB | 1,135 | 42 | **29 / 152** | ✅ |
+| `Real-world drawing C` | 3,623KB | 18.5MB | 45,552 | 117 | 0 / 1016 | ✅ |
+
+Tất cả đều convert + parse + render thành công mà user **không cần cài tool nào**.
+
+Cột cuối là số block bị lệch trước khi có fix OCS ở v1.0.3 — xem mục
+[Đồng bộ fix từ dự án DXF](#-đồng-bộ-fix-từ-dự-án-markdown-dxf-previewer).
 
 ### Corpus 17 sample drawing của AutoCAD (`npm run test:corpus`)
 
@@ -174,8 +192,37 @@ Nguyên nhân: `parseDxf.ts:1024` chỉ ghi nhận entity bị bỏ qua **bên t
 `mapEntity` chỉ nhìn thấy những gì dxf-parser đã đọc được. dxf-parser âm thầm bỏ luôn
 3DSOLID / PLANESURFACE / LIGHT ngay từ đầu, nên chúng không bao giờ tới được chỗ đếm.
 
-Điều này khiến lời hứa trong `MARKETPLACE.md` — *"the toolbar shows a banner naming any
-entity type it couldn't draw"* — không đúng với đúng nhóm file cần nó nhất.
+**Đã xử lý một nửa ở v1.0.3:** empty state giờ hiện thông báo giải thích canvas trống, nên
+người dùng không còn nhìn vào màn hình đen câm lặng. Nhưng vì `skippedEntityTypes` vẫn rỗng,
+thông báo chỉ nói chung chung là "bản vẽ dựng từ 3D solid/mesh/surface" mà **không nêu được
+đúng loại entity** có trong file. Banner trên toolbar cũng vẫn không hiện gì.
+
+Để dứt điểm, parser cần đếm entity type từ chính DXF text rồi đối chiếu với những gì đã map
+— khi đó cả banner lẫn empty state mới nói đúng tên. Vẫn nằm trong backlog, priority High.
+
+---
+
+## 🔗 Đồng bộ fix từ dự án `markdown-dxf-previewer`
+
+Hai dự án dùng chung phần lớn `src/dxf/`, nên fix bên kia phải được port sang.
+
+**Đã port — INSERT bị mirror vẽ sai vị trí và sai góc** (nguồn: commit `f879b0d`, 11/08)
+
+Lệnh MIRROR của AutoCAD thường không đụng tới hình học của block mà lật hướng đùn của
+INSERT thành `(0,0,-1)`. Điểm chèn (code 10/20) và góc xoay (code 50) khi đó ghi theo hệ
+toạ độ OCS đã lật, không phải toạ độ thế giới — đọc thẳng là đặt sai chỗ mọi block bị mirror.
+
+Cách sửa: `extrusionMatrix()` trong `src/dxf/matrix.ts` (thuật toán arbitrary axis của DXF),
+nhân vào ngoài cùng chuỗi transform trong `expandInsert`.
+
+Vì sao lọt qua mọi vòng kiểm tra trước đó: **17 file mẫu của AutoCAD không có INSERT nào bị
+mirror**, nên corpus test không thể chạm tới. Chỉ bản vẽ kiến trúc thật mới dùng MIRROR nhiều.
+
+Kiểm chứng: tắt fix → test đỏ; ảnh chụp trước/sau trên `Real-world drawing B` cho
+thấy nét vẽ nằm ngoài khung bản vẽ giảm từ 64 px và 61 px xuống **0**.
+
+**Chưa rà:** các commit khác của dự án DXF (`3eb0b06`, `bd179a3`) đụng vào `parseDxf.ts`,
+`viewport.ts`, `renderer.ts`, `export.ts` — chưa đối chiếu xem còn khác biệt nào đáng port.
 
 ---
 
@@ -205,19 +252,34 @@ Ngoài ra `ARCHITECTURE.md` được sửa lại: đảo đúng chiều 6 thông
 
 ## 🔜 Backlog (có thể cải thiện thêm)
 
-| # | Feature | Mục đích | Priority |
-|---|---------|----------|----------|
-| 1 | Viewport culling | Chỉ render entities trong viewport → giảm lag zoom/pan file lớn | High |
-| 2 | Canvas 2D renderer | Thay SVG bằng Canvas cho file >20K entities | High |
-| 3 | Web Worker parsing | parseDxf chạy worker thread → không block host | Medium |
-| 4 | LRU cache eviction | Giới hạn memory khi mở nhiều file lớn | Medium |
-| 5 | DWG version badge | Hiện version (AC1021=2007, etc) trên toolbar | Low |
-| 6 | Thumbnail preview | Thumbnail trong Explorer sidebar | Low |
-| 7 | Search entities | Tìm entity theo layer/type/text | Low |
-| 8 | Measurement tool | Đo khoảng cách 2 điểm trên bản vẽ | Low |
-| 9 | Báo entity bị dxf-parser bỏ rơi | Bản vẽ 3D mở ra trắng mà banner không nói gì — xem mục Phát hiện bên dưới | **High** |
-| 10 | Mở rộng unit test | Phủ thêm `parseDxf` (block expansion, resolve màu/linetype) và `parseEdgeLoop` của hatch | Medium |
-| 11 | Tối ưu parse file nhiều hatch | `colorwh.dwg` mất 6.8s parse cho 36K entity, trong khi file 45K entity chỉ mất 640ms | Medium |
+| # | Việc | Vì sao | Priority |
+|---|------|--------|----------|
+| 1 | Báo đúng entity bị dxf-parser bỏ rơi | Bản vẽ 3D mở ra trống mà banner không nêu được tên entity — xem [Phát hiện từ corpus](#-phát-hiện-từ-corpus-bản-vẽ-3d-mở-ra-trắng-mà-không-báo-gì) | **High** |
+| 2 | Rà nốt fix từ dự án DXF | Commit `3eb0b06`, `bd179a3` đụng `parseDxf`/`viewport`/`renderer`/`export`, chưa đối chiếu | **High** |
+| 3 | Thêm bản vẽ kiến trúc thật vào corpus | 17 file mẫu AutoCAD không có INSERT mirror nên không bắt được lỗi vừa rồi | **High** |
+| 4 | Viewport culling | Chỉ render entity trong vùng nhìn → giảm lag zoom/pan file lớn | High |
+| 5 | Canvas 2D renderer | Thay SVG bằng Canvas cho file >20K entity | High |
+| 6 | Web Worker parsing | `parseDxf` chạy worker thread → không block extension host | Medium |
+| 7 | LRU cache eviction | `parseCache` không có trần, mở nhiều file lớn là phình RAM | Medium |
+| 8 | Tối ưu parse file nhiều hatch | `colorwh.dwg` mất 6,8 s cho 36K entity, trong khi file 45K entity chỉ mất 640 ms | Medium |
+| 9 | Mở rộng unit test | Phủ thêm `parseDxf` (block expansion, resolve màu/linetype) và `parseEdgeLoop` của hatch | Medium |
+| 10 | Nền sáng cho canvas | Canvas hardcode `#1e1e1e`; muốn theo theme sáng phải đảo màu ACI 7 theo nền | Medium |
+| 11 | Export toàn bộ bản vẽ | Hiện chỉ xuất đúng khung nhìn, PNG giới hạn cạnh 2400 px, không có lựa chọn khác | Medium |
+| 12 | Trạng thái lỗi thân thiện | `showError` xoá cả toolbar và hiện stack trace JavaScript, không có nút thử lại | Medium |
+| 13 | DWG version badge | Hiện version (AC1021 = 2007…) trên toolbar | Low |
+| 14 | Thumbnail preview | Thumbnail trong Explorer sidebar — `DwgDatabase` của libredwg có sẵn `thumbnailImage` | Low |
+| 15 | Search entities | Tìm entity theo layer / type / nội dung text | Low |
+| 16 | Measurement tool | Đo khoảng cách 2 điểm trên bản vẽ | Low |
+
+### Hướng lớn đáng cân nhắc
+
+**Bỏ vòng DXF text trung gian.** `@mlightcad/libredwg-web` đã expose `dwg_read_data()` +
+`convert()` trả thẳng `DwgDatabase` có cấu trúc (36 entity type đã định nghĩa, gồm cả HATCH /
+VIEWPORT / ATTRIB / LEADER / MULTILEADER / TABLE). Hiện tại pipeline đang đi
+`DWG → chuỗi DXF 18 MB → quét 7 lượt`. Dùng `convert()` sẽ bỏ được chuỗi trung gian, xoá
+khoảng 700 dòng raw scanner tự viết, và mở đường cho các entity chưa hỗ trợ.
+
+Cần spike đối chiếu số lượng entity trước khi làm — corpus baseline chính là lưới an toàn.
 
 ---
 
@@ -302,7 +364,7 @@ npm install          # Cài dependencies
 npm run build        # Build extension + webview
 npm run watch        # Watch mode
 npm run typecheck    # TypeScript check
-npm test             # 66 unit test (node:test, không cần dependency ngoài)
+npm test             # 72 unit test (node:test, không cần dependency ngoài)
 
 # Corpus test — chạy pipeline thật trên cả thư mục .dwg
 npm run test:corpus -- /đường/dẫn/tới/thư-mục          # đối chiếu baseline
@@ -318,7 +380,24 @@ Xem log convert: **View → Output → chọn "DWG Previewer"** trong dropdown.
 
 ## 📝 Changelog
 
-### 2026-08-12 — 15:45 · v1.0.3 · Cải thiện UI/UX
+### 2026-08-12 — 15:55 · v1.0.3 · Cải thiện UI/UX + sửa INSERT bị mirror
+
+**Sửa lỗi — INSERT bị mirror vẽ sai vị trí và sai góc**
+
+Lệnh MIRROR của AutoCAD thường không đụng tới hình học của block mà lật hướng đùn
+của INSERT thành `(0,0,-1)`; điểm chèn và góc xoay khi đó ghi theo hệ OCS đã lật
+chứ không phải toạ độ thế giới. Đọc thẳng là đặt sai chỗ mọi block bị mirror.
+
+- Port `extrusionMatrix()` (thuật toán arbitrary axis của DXF) từ dự án
+  `markdown-dxf-previewer` — commit `f879b0d`, lỗi đã được sửa bên đó ngày 11/08
+- Ảnh hưởng thật: `Real-world drawing B` có **29/152 INSERT** bị mirror,
+  `Real-world drawing A` có 4/304
+- 17 file mẫu AutoCAD **không có** INSERT mirror nào — nên corpus test không thể
+  phát hiện lỗi này, đó là lý do nó lọt qua mọi vòng kiểm tra trước đó
+- Kiểm chứng bằng ảnh trước/sau: nét vẽ nằm ngoài khung bản vẽ giảm từ 64 px và
+  61 px xuống 0
+
+**Cải thiện UI/UX**
 - **Empty state** — canvas trống giờ luôn nói rõ lý do; sửa lỗi P0 mà corpus test đã phát hiện (bản vẽ 3D mở ra đen trơn không một lời giải thích)
 - **Thanh trạng thái** — toạ độ, mức zoom, số object, gợi ý thao tác (giải quyết việc double-click = fit trước đây không ai biết)
 - **Nút zoom −/+/Fit** trên toolbar
