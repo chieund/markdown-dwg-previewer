@@ -353,6 +353,7 @@ function toggleInSelection(obj: number): number[] {
 function select(objs: number[], options: { zoom: boolean; inspect: boolean }): void {
   selection = objs;
   refreshHighlight();
+  takeoffPanel?.syncSelection();
 
   if (options.zoom && activeSvg && fittedView) {
     const bounds = objectIndex.boundsOf(objs);
@@ -390,6 +391,7 @@ function clearSelection(): void {
   if (!selection.length && !inspector) return;
   selection = [];
   refreshHighlight();
+  takeoffPanel?.syncSelection();
   inspector?.remove();
   inspector = null;
   updateStatusBar();
@@ -762,10 +764,9 @@ function currentTakeoff() {
 }
 
 /**
- * Opens the quantities panel, or closes it if it is already open.
- *
- * It and the inspector both describe the selection, and two panels over one
- * canvas only get in each other's way, so opening one closes the other.
+ * Opens the quantities panel, or closes it if it is already open. The inspector
+ * can stay open beside it — clicking an object while measuring describes it to
+ * the left of the panel rather than on top of it.
  */
 function toggleTakeoffPanel(): void {
   // Open means on screen: a panel no longer in the page is opened afresh.
@@ -788,9 +789,6 @@ function toggleTakeoffPanel(): void {
 }
 
 function openTakeoffPanel(host: HTMLElement): void {
-  inspector?.remove();
-  inspector = null;
-
   takeoffPanel = buildTakeoffPanel({
     pageName: () => scene?.pages[scene.pageIndex].name ?? '',
     declaredUnits: knownUnits(scene?.insunits),
@@ -810,6 +808,8 @@ function openTakeoffPanel(host: HTMLElement): void {
     // Selecting from the panel zooms in; there is nothing to describe, since a
     // layer or a block is not one object.
     onSelect: (objs) => select(objs, { zoom: true, inspect: false }),
+    selection: () => selection,
+    layerColor: (name) => scene?.pages[scene.pageIndex].layers.find((layer) => layer.name === name)?.color,
     onClose: closeTakeoffPanel,
     onCopy: copyToClipboard,
     // The BOM travels with the text: Excel reads a CSV without it as ANSI and
@@ -817,11 +817,13 @@ function openTakeoffPanel(host: HTMLElement): void {
     onExportCsv: (text) => vscodeApi.postMessage({ type: 'EXPORT', format: 'csv', data: UTF8_BOM + text }),
   });
   host.appendChild(takeoffPanel.element);
+  host.classList.add('dwg-with-takeoff');
 }
 
 function closeTakeoffPanel(): void {
   takeoffPanel?.element.remove();
   takeoffPanel = null;
+  canvasHost?.classList.remove('dwg-with-takeoff');
 }
 
 /**
@@ -1034,9 +1036,10 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     searchControl.open();
   } else if (event.key === 'Escape') {
+    // Innermost first: the search, then the selection and its inspector, then the panel
     if (searchControl?.isOpen()) searchControl.close();
+    else if (selection.length || inspector) clearSelection();
     else if (takeoffPanel) closeTakeoffPanel();
-    else clearSelection();
   }
 });
 

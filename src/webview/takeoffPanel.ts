@@ -2,12 +2,11 @@
  * The Quantities panel: block counts and per-layer length, area and hatch area
  * for the sheet on screen.
  *
- * It sits where the inspector sits — one of the two at a time, since both
- * describe the same selection and two panels on one canvas only get in the
- * way. Every row can select its objects, which is what makes the numbers
+ * It sits at the top right; the inspector moves to its left while it is open.
+ * Every row can select its objects, which is what makes the numbers
  * checkable: the estimator can jump to the fourteen doors and count them.
  */
-import { DECLARABLE_UNITS, NO_VALUE, OUTPUT_UNITS, Unit, convertArea, convertLength, formatArea, formatLength, formatNumber } from './units';
+import { DECLARABLE_UNITS, OUTPUT_UNITS, Unit, convertArea, convertLength, formatArea, formatLength, formatNumber } from './units';
 import { toCsv, toTsv } from './table';
 import { EMPTY_TAKEOFF, Takeoff } from './takeoff';
 
@@ -27,6 +26,10 @@ export interface TakeoffPanelOptions {
   compute(): Takeoff;
   /** Selects the given objects and zooms to them. */
   onSelect(objects: number[]): void;
+  /** What is selected on the canvas, so the row that selected it stays marked. */
+  selection(): number[];
+  /** A layer's colour on the page, for the swatch that ties a row to the drawing. */
+  layerColor(name: string): string | undefined;
   /** Closes the panel. */
   onClose(): void;
   /** Hands text to the clipboard. */
@@ -39,6 +42,44 @@ export interface TakeoffPanel {
   element: HTMLElement;
   /** Recomputes and redraws both tabs. */
   refresh(): void;
+  /** Marks the row whose objects are the selection; cheap, for every click on the canvas. */
+  syncSelection(): void;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * A magnifier over a crosshair: "find these on the drawing". Drawn rather than
+ * a glyph — the ⌖ character is missing from many fonts and renders as a box.
+ */
+function locateIcon(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('width', '14');
+  svg.setAttribute('height', '14');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('d', 'M6.5 1.5a5 5 0 1 0 0 10a5 5 0 1 0 0-10ZM6.5 4v5M4 6.5h5M10.2 10.2L14.5 14.5');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '1.5');
+  path.setAttribute('stroke-linecap', 'round');
+  svg.appendChild(path);
+  return svg;
+}
+
+/** Whether a row's objects are exactly the selection, in any order. */
+function sameObjects(a: number[], b: number[]): boolean {
+  if (a.length !== b.length || a.length === 0) return false;
+  const set = new Set(b);
+  return a.every((index) => set.has(index));
+}
+
+interface TableRow {
+  cells: string[];
+  objects: number[];
+  /** Layer colour shown before the name. */
+  color?: string;
 }
 
 type Tab = 'blocks' | 'layers';
@@ -160,13 +201,15 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
 
   // ── What gets copied and saved ────────────────────────────────────────────
 
-  /** Column headings plus one line per entry, shared by the table and its exports. */
-  const tabTable = (): { labels: string[]; rows: { cells: string[]; objects: number[] }[] } => {
+  /** Column headings plus one line per entry, shared by the table and its exports, and the total under them. */
+  const tabTable = (): { labels: string[]; rows: TableRow[]; total: string[] } => {
     const unit = options.unit();
     if (tab === 'blocks') {
+      const count = takeoff.blocks.reduce((sum, row) => sum + row.count, 0);
       return {
         labels: ['Block', 'Count'],
         rows: takeoff.blocks.map((row) => ({ cells: [row.name, String(row.count)], objects: row.objects })),
+        total: ['Total', count.toLocaleString()],
       };
     }
     // "Drawing units" after every number, or in every heading, crowds the table
@@ -179,7 +222,15 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
       rows: takeoff.layers.map((row) => ({
         cells: [row.name, String(row.count), length(row.length), area(row.area), area(row.hatchArea)],
         objects: row.objects,
+        color: options.layerColor(row.name),
       })),
+      total: [
+        'Total',
+        takeoff.totals.count.toLocaleString(),
+        length(takeoff.totals.length),
+        area(takeoff.totals.area),
+        area(takeoff.totals.hatchArea),
+      ],
     };
   };
 
@@ -206,22 +257,51 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
 
   // ── Rendering ─────────────────────────────────────────────────────────────
 
-  const buildRow = (cells: string[], objects: number[]): HTMLElement => {
+  /** Rows on screen with what they select, to mark the one matching the selection. */
+  let rowElements: { element: HTMLElement; objects: number[] }[] = [];
+
+  const syncSelection = () => {
+    const selection = options.selection();
+    for (const { element, objects } of rowElements) {
+      element.classList.toggle('dwg-takeoff-row-active', sameObjects(objects, selection));
+    }
+  };
+
+  const buildRow = ({ cells, objects, color }: TableRow): HTMLElement => {
     const row = document.createElement('div');
     row.className = 'dwg-takeoff-row';
-    for (const text of cells) {
+    cells.forEach((text, column) => {
       const cell = document.createElement('span');
-      cell.textContent = text;
+      if (column === 0) {
+        cell.className = 'dwg-takeoff-name';
+        if (color) {
+          const swatch = document.createElement('span');
+          swatch.className = 'dwg-layer-swatch';
+          swatch.style.background = color;
+          cell.appendChild(swatch);
+        }
+        const name = document.createElement('span');
+        name.textContent = text;
+        name.title = text;
+        cell.appendChild(name);
+      } else {
+        cell.className = 'dwg-takeoff-number';
+        cell.textContent = text;
+      }
       row.appendChild(cell);
-    }
-    // ⌖ selects and zooms to exactly what the row counts.
+    });
+    // Selects and zooms to exactly what the row counts.
     const locate = document.createElement('button');
     locate.className = 'dwg-takeoff-locate';
-    locate.textContent = '⌖';
     locate.title = 'Select these objects and zoom to them';
-    locate.setAttribute('aria-label', 'Select these objects');
-    locate.addEventListener('click', () => options.onSelect(objects));
+    locate.setAttribute('aria-label', `Select ${cells[0]} on the drawing`);
+    locate.appendChild(locateIcon());
+    locate.addEventListener('click', () => {
+      options.onSelect(objects);
+      syncSelection();
+    });
     row.appendChild(locate);
+    rowElements.push({ element: row, objects });
     return row;
   };
 
@@ -239,6 +319,8 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
         : `Quantities · ${page} · ${takeoff.totals.count.toLocaleString()} objects`;
 
     body.textContent = '';
+    rowElements = [];
+    body.className = `dwg-takeoff-body dwg-takeoff-${tab}`;
     if (takeoff.totals.count === 0) {
       const empty = document.createElement('div');
       empty.className = 'dwg-layer-nomatch';
@@ -247,29 +329,24 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
       return;
     }
 
-    const { labels, rows } = tabTable();
-    const headerRow = document.createElement('div');
-    headerRow.className = 'dwg-takeoff-row dwg-takeoff-head';
-    for (const label of labels) {
-      const cell = document.createElement('span');
-      cell.textContent = label;
-      headerRow.appendChild(cell);
-    }
-    headerRow.appendChild(document.createElement('span'));
-    body.appendChild(headerRow);
-
-    for (const row of rows) body.appendChild(buildRow(row.cells, row.objects));
-
-    const total = document.createElement('div');
-    total.className = 'dwg-takeoff-total';
-    const length = toLength(takeoff.totals.length);
-    const area = toArea(takeoff.totals.area);
-    total.textContent = [
-      `${takeoff.totals.count.toLocaleString()} objects`,
-      length > 0 ? `length ${formatLength(length, options.unit())}` : NO_VALUE,
-      area > 0 ? `area ${formatArea(area, options.unit())}` : NO_VALUE,
-    ].join(' · ');
-    body.appendChild(total);
+    const { labels, rows, total } = tabTable();
+    // Header, rows and total share one set of columns, so the numbers line up
+    const line = (cells: string[], className: string) => {
+      const row = document.createElement('div');
+      row.className = `dwg-takeoff-row ${className}`;
+      cells.forEach((text, column) => {
+        const cell = document.createElement('span');
+        cell.className = column === 0 ? 'dwg-takeoff-name' : 'dwg-takeoff-number';
+        cell.textContent = text;
+        row.appendChild(cell);
+      });
+      row.appendChild(document.createElement('span'));
+      return row;
+    };
+    body.appendChild(line(labels, 'dwg-takeoff-head'));
+    for (const row of rows) body.appendChild(buildRow(row));
+    body.appendChild(line(total, 'dwg-takeoff-total'));
+    syncSelection();
   }
 
   render();
@@ -277,5 +354,6 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
   return {
     element: panel,
     refresh: render,
+    syncSelection,
   };
 }

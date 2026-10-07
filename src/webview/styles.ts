@@ -156,7 +156,7 @@ export const WEBVIEW_STYLES = `
 
     /* Quantities panel — where the inspector sits, one of the two at a time. */
     .dwg-takeoff {
-      position: absolute; top: 8px; right: 8px; z-index: 5; width: 380px; max-width: calc(100% - 16px);
+      position: absolute; top: 8px; right: 8px; z-index: 5; width: 480px; max-width: calc(100% - 16px);
       display: flex; flex-direction: column; max-height: calc(100% - 16px);
       background: var(--dwg-surface); color: var(--dwg-text);
       border: 1px solid var(--dwg-border); border-radius: 3px;
@@ -192,25 +192,40 @@ export const WEBVIEW_STYLES = `
     .dwg-takeoff-tab:focus-visible { outline: 1px solid var(--dwg-focus); outline-offset: -2px; }
     .dwg-takeoff-tab-active { color: var(--dwg-text); border-bottom-color: var(--dwg-focus); }
     .dwg-takeoff-body { flex: 1 1 auto; overflow-y: auto; padding: 2px 0; }
+    /* Header, rows and total share one grid per tab, so every number sits under its heading. */
     .dwg-takeoff-row {
-      display: flex; align-items: center; gap: 8px; padding: 2px 8px;
-      font-variant-numeric: tabular-nums;
+      display: grid; align-items: center; column-gap: 8px; padding: 1px 8px; min-height: 24px;
+      border-left: 2px solid transparent; font-variant-numeric: tabular-nums;
     }
-    .dwg-takeoff-row > span:first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .dwg-takeoff-row > span:not(:first-child) { flex: 0 0 auto; color: var(--dwg-muted); font-size: 11px; }
-    .dwg-takeoff-row:hover { background: var(--dwg-row-hover); }
-    .dwg-takeoff-head { color: var(--dwg-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--dwg-divider); }
+    .dwg-takeoff-blocks .dwg-takeoff-row { grid-template-columns: minmax(0, 1fr) 64px 26px; }
+    .dwg-takeoff-layers .dwg-takeoff-row { grid-template-columns: minmax(0, 1fr) 48px 78px 78px 78px 26px; }
+    .dwg-takeoff-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .dwg-takeoff-name > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dwg-takeoff-number { text-align: right; white-space: nowrap; color: var(--dwg-muted); font-size: 11px; }
+    .dwg-takeoff-row:not(.dwg-takeoff-head):not(.dwg-takeoff-total):hover { background: var(--dwg-row-hover); }
+    .dwg-takeoff-row-active {
+      background: var(--vscode-list-inactiveSelectionBackground, #37373d);
+      border-left-color: var(--dwg-highlight);
+    }
+    .dwg-takeoff-row-active .dwg-takeoff-number { color: var(--dwg-text); }
+    .dwg-takeoff-head {
+      min-height: 20px; color: var(--dwg-muted); font-size: 10px; text-transform: uppercase;
+      letter-spacing: 0.04em; border-bottom: 1px solid var(--dwg-divider);
+    }
+    .dwg-takeoff-head .dwg-takeoff-number { font-size: 10px; }
     .dwg-takeoff-locate {
-      flex: 0 0 auto; width: 20px; background: none; border: 1px solid transparent;
-      border-radius: 2px; color: var(--dwg-muted); cursor: pointer; font: inherit;
-      font-size: 12px; line-height: 1; padding: 1px 0; opacity: 0.4;
+      display: flex; align-items: center; justify-content: center; width: 26px; height: 22px;
+      background: none; border: 1px solid transparent; border-radius: 3px; padding: 0;
+      color: var(--dwg-muted); cursor: pointer; opacity: 0.75;
     }
-    .dwg-takeoff-row:hover .dwg-takeoff-locate, .dwg-takeoff-locate:focus-visible { opacity: 1; }
-    .dwg-takeoff-locate:hover { background: var(--dwg-control-hover); color: var(--dwg-text); border-color: var(--dwg-border); }
+    .dwg-takeoff-row:hover .dwg-takeoff-locate, .dwg-takeoff-locate:focus-visible { opacity: 1; color: var(--dwg-text); }
+    .dwg-takeoff-locate:hover { background: var(--dwg-control-hover); border-color: var(--dwg-border); }
+    .dwg-takeoff-locate:focus-visible { outline: 1px solid var(--dwg-focus); outline-offset: 0; }
     .dwg-takeoff-total {
-      position: sticky; bottom: 0; padding: 4px 8px; color: var(--dwg-text);
-      border-top: 1px solid var(--dwg-divider); background: var(--dwg-surface);
+      position: sticky; bottom: 0; min-height: 26px; font-weight: 600; color: var(--dwg-text);
+      border-top: 1px solid var(--dwg-border); background: var(--dwg-surface);
     }
+    .dwg-takeoff-total .dwg-takeoff-number { color: var(--dwg-text); }
     .dwg-takeoff-footer { display: flex; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--dwg-divider); }
     .dwg-takeoff-action {
       flex: 1 1 auto; padding: 3px 8px; font: inherit; font-size: 11px;
@@ -219,6 +234,9 @@ export const WEBVIEW_STYLES = `
     }
     .dwg-takeoff-action:hover { background: var(--dwg-control-hover); }
     .dwg-takeoff-action:focus-visible { outline: 1px solid var(--dwg-focus); outline-offset: 1px; }
+    /* With the quantities panel open, the inspector moves to its left instead of
+       landing on top of it; on a narrow canvas it keeps to the left edge. */
+    .dwg-with-takeoff .dwg-inspector { right: min(496px, calc(100% - 288px)); }
     .dwg-status-selection { color: var(--dwg-highlight); }
 
     .dwg-banner {

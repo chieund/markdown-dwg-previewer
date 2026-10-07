@@ -113,6 +113,30 @@ function interactionScript(action: string | undefined): string {
       [...document.querySelectorAll('.dwg-takeoff-tab')]
         .find((b) => b.textContent === 'Layers')?.click();`;
   }
+  if (action?.startsWith('quantities-locate=')) {
+    // The n-th row's locate button: its objects selected, its row marked
+    const row = Number(action.slice('quantities-locate='.length));
+    return `
+      [...document.querySelectorAll('.dwg-toolbar button')]
+        .find((b) => b.textContent === 'Quantities')?.click();
+      document.querySelectorAll('.dwg-takeoff-locate')[${row}]?.click();`;
+  }
+  if (action?.startsWith('quantities-inspect=')) {
+    // Quantities open, then a click on a text: the inspector must sit beside the panel
+    const needle = JSON.stringify(action.slice('quantities-inspect='.length));
+    return `
+      [...document.querySelectorAll('.dwg-toolbar button')]
+        .find((b) => b.textContent === 'Quantities')?.click();
+      const target = [...document.querySelectorAll('.dwg-canvas svg text')].find((t) => t.textContent.includes(${needle}));
+      if (target) {
+        const r = target.getBoundingClientRect();
+        const init = { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0 };
+        const svg = document.querySelector('.dwg-canvas svg');
+        svg.dispatchEvent(new MouseEvent('mousedown', init));
+        window.dispatchEvent(new MouseEvent('mouseup', init));
+        svg.dispatchEvent(new MouseEvent('click', init));
+      }`;
+  }
   if (action?.startsWith('quantities-page=')) {
     // Quantities open, then another page: the panel must follow, not vanish
     const page = Number(action.slice('quantities-page='.length));
