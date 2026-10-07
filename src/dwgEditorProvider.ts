@@ -117,9 +117,12 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
         if (message?.type === 'READY') {
           void sendContent();
         } else if (message?.type === 'EXPORT') {
-          if ((message.format === 'svg' || message.format === 'png') && typeof message.data === 'string') {
+          if ((message.format === 'svg' || message.format === 'png' || message.format === 'csv') && typeof message.data === 'string') {
             void this.saveExport(document.uri, message.format, message.data);
           }
+        } else if (message?.type === 'COPY') {
+          // A webview can be denied clipboard access; the host is not.
+          if (typeof message.text === 'string') void vscode.env.clipboard.writeText(message.text);
         } else if (message?.type === 'EXPORT_FAILED') {
           void vscode.window.showErrorMessage(`Export failed: ${String(message.message)}`);
         }
@@ -146,7 +149,7 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
     });
   }
 
-  private async saveExport(source: vscode.Uri, format: 'svg' | 'png', data: string): Promise<void> {
+  private async saveExport(source: vscode.Uri, format: 'svg' | 'png' | 'csv', data: string): Promise<void> {
     const suggestedName = `${path.basename(source.fsPath, path.extname(source.fsPath))}.${format}`;
     const target = await vscode.window.showSaveDialog({
       defaultUri: vscode.Uri.joinPath(source.with({ path: path.dirname(source.path) }), suggestedName),
@@ -155,7 +158,8 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
     if (!target) return;
 
     try {
-      const bytes = format === 'svg' ? Buffer.from(data, 'utf-8') : Buffer.from(data, 'base64');
+      // PNG arrives base64-encoded from the canvas; text formats are plain.
+      const bytes = format === 'png' ? Buffer.from(data, 'base64') : Buffer.from(data, 'utf-8');
       await vscode.workspace.fs.writeFile(target, bytes);
       void vscode.window.showInformationMessage(`Saved ${path.basename(target.fsPath)}`);
     } catch (err) {

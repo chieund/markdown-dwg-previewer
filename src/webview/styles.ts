@@ -154,6 +154,73 @@ export const WEBVIEW_STYLES = `
     .dwg-inspector-table .dwg-layer-swatch { display: inline-block; margin-right: 6px; vertical-align: -1px; }
     .dwg-inspector-hidden td { opacity: 0.6; font-style: italic; }
 
+    /* Quantities panel — where the inspector sits, one of the two at a time. */
+    .dwg-takeoff {
+      position: absolute; top: 8px; right: 8px; z-index: 5; width: 380px; max-width: calc(100% - 16px);
+      display: flex; flex-direction: column; max-height: calc(100% - 16px);
+      background: var(--dwg-surface); color: var(--dwg-text);
+      border: 1px solid var(--dwg-border); border-radius: 3px;
+      box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
+      font-family: var(--vscode-font-family, sans-serif); font-size: 12px;
+    }
+    .dwg-takeoff-header {
+      display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+      border-bottom: 1px solid var(--dwg-divider);
+    }
+    .dwg-takeoff-title {
+      flex: 1 1 auto; font-weight: 600; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .dwg-takeoff-units {
+      flex: 0 0 auto; background: var(--vscode-dropdown-background, #3c3c3c);
+      color: var(--vscode-dropdown-foreground, #cccccc);
+      border: 1px solid var(--vscode-dropdown-border, #5a5a5a);
+      border-radius: 2px; padding: 1px 4px; font: inherit; font-size: 11px;
+    }
+    .dwg-takeoff-units:focus-visible { outline: 1px solid var(--dwg-focus); outline-offset: 1px; }
+    .dwg-takeoff-hint {
+      padding: 4px 8px; color: var(--dwg-muted); font-size: 10px; line-height: 1.4;
+      border-bottom: 1px solid var(--dwg-divider);
+    }
+    .dwg-takeoff-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--dwg-divider); }
+    .dwg-takeoff-tab {
+      flex: 1 1 auto; padding: 4px 8px; background: none; border: none;
+      border-bottom: 2px solid transparent; color: var(--dwg-muted);
+      cursor: pointer; font: inherit;
+    }
+    .dwg-takeoff-tab:hover { color: var(--dwg-text); }
+    .dwg-takeoff-tab:focus-visible { outline: 1px solid var(--dwg-focus); outline-offset: -2px; }
+    .dwg-takeoff-tab-active { color: var(--dwg-text); border-bottom-color: var(--dwg-focus); }
+    .dwg-takeoff-body { flex: 1 1 auto; overflow-y: auto; padding: 2px 0; }
+    .dwg-takeoff-row {
+      display: flex; align-items: center; gap: 8px; padding: 2px 8px;
+      font-variant-numeric: tabular-nums;
+    }
+    .dwg-takeoff-row > span:first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dwg-takeoff-row > span:not(:first-child) { flex: 0 0 auto; color: var(--dwg-muted); font-size: 11px; }
+    .dwg-takeoff-row:hover { background: var(--dwg-row-hover); }
+    .dwg-takeoff-head { color: var(--dwg-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--dwg-divider); }
+    .dwg-takeoff-locate {
+      flex: 0 0 auto; width: 20px; background: none; border: 1px solid transparent;
+      border-radius: 2px; color: var(--dwg-muted); cursor: pointer; font: inherit;
+      font-size: 12px; line-height: 1; padding: 1px 0; opacity: 0.4;
+    }
+    .dwg-takeoff-row:hover .dwg-takeoff-locate, .dwg-takeoff-locate:focus-visible { opacity: 1; }
+    .dwg-takeoff-locate:hover { background: var(--dwg-control-hover); color: var(--dwg-text); border-color: var(--dwg-border); }
+    .dwg-takeoff-total {
+      position: sticky; bottom: 0; padding: 4px 8px; color: var(--dwg-text);
+      border-top: 1px solid var(--dwg-divider); background: var(--dwg-surface);
+    }
+    .dwg-takeoff-footer { display: flex; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--dwg-divider); }
+    .dwg-takeoff-action {
+      flex: 1 1 auto; padding: 3px 8px; font: inherit; font-size: 11px;
+      background: var(--dwg-control); color: var(--dwg-control-text);
+      border: 1px solid var(--dwg-border); border-radius: 2px; cursor: pointer; white-space: nowrap;
+    }
+    .dwg-takeoff-action:hover { background: var(--dwg-control-hover); }
+    .dwg-takeoff-action:focus-visible { outline: 1px solid var(--dwg-focus); outline-offset: 1px; }
+    .dwg-status-selection { color: var(--dwg-highlight); }
+
     .dwg-banner {
       display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto;
       color: var(--dwg-warning);

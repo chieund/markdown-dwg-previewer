@@ -33,8 +33,19 @@ import {
 } from './matrix';
 import AUTO_CAD_COLOR_INDEX from 'dxf-parser/dist/AutoCadColorIndex';
 import { expandBulges } from './bulge';
+import { scanBlockNames } from './blockNames';
 import { EntityExtras, Vector3D, scanEntityExtras } from './extras';
 import { scanHatches } from './hatch';
+import {
+  Measure,
+  arcLength,
+  circleMeasure,
+  hatchArea,
+  polylineMeasure,
+  polygonMeasure,
+  sampledMeasure,
+  scaleMeasure,
+} from './measure';
 import { RawViewport, scanViewports, viewportTransform } from './viewport';
 import { sampleSpline } from './spline';
 import { computeBounds } from '../shared/bounds';
@@ -97,6 +108,8 @@ interface ParseContext {
   textStyles: Record<string, string>;
   /** Extrusion, text style and file position per entity handle. */
   extras: EntityExtras;
+  /** Anonymous block name → the block it is a representation of. */
+  blockNames: Record<string, string>;
   trustLayerOffFlags: boolean;
   maxEntities: number;
   /**
@@ -505,6 +518,7 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
     layerHandleMap: scanLayerHandles(text),
     textStyles: scanTextStyles(text),
     extras,
+    blockNames: scanBlockNames(text),
     trustLayerOffFlags: options.trustLayerOffFlags ?? true,
     maxEntities: options.maxEntities ?? MAX_ENTITIES,
     keep: null,
@@ -522,7 +536,7 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   const objectPlace: string[] = [];
   const objectOf = new Map<IEntity, number>();
   const register = (raw: IEntity, place: string): number => {
-    const index = context.objects.push(describeObject(raw)) - 1;
+    const index = context.objects.push(describeObject(raw, context.blockNames)) - 1;
     objectPlace.push(place);
     objectOf.set(raw, index);
     return index;
@@ -628,6 +642,8 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
     objects: context.objects,
     skippedEntityTypes: Array.from(context.skippedEntityTypes),
   };
+  const units = readInsertUnits(dxf);
+  if (units !== undefined) result.units = units;
   if (context.limitReached) {
     result.warnings = [
       `Drawing cut short: it expands to more than ${context.maxEntities.toLocaleString('en-US')} objects (the limit), ` +
@@ -637,8 +653,22 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   return result;
 }
 
+/**
+ * `$INSUNITS`, the header variable saying what one drawing unit is worth
+ * (1 = inch, 2 = foot, 4 = mm, 5 = cm, 6 = m …).
+ *
+ * Left undefined when the file declares none — R12 predates the variable, and
+ * plenty of later drawings never set it. Guessing is worse than asking, since
+ * every number in the quantities panel would be off by orders of magnitude.
+ */
+function readInsertUnits(dxf: ReturnType<DxfParser['parseSync']>): number | undefined {
+  const raw = (dxf?.header as Record<string, unknown> | undefined)?.['$INSUNITS'];
+  const value = typeof raw === 'number' ? raw : Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 /** What the search and the inspector show for one top-level entity. */
-function describeObject(raw: IEntity): ObjectInfo {
+function describeObject(raw: IEntity, blockNames: Record<string, string>): ObjectInfo {
   const info: ObjectInfo = { type: raw.type, layer: raw.layer ?? '0', page: 0 };
   // dxf-parser numbers entities that have no handle (R12) itself; only a
   // string came from the file, and only a real handle may pair objects up.
@@ -647,7 +677,9 @@ function describeObject(raw: IEntity): ObjectInfo {
   switch (raw.type) {
     case 'INSERT': {
       const e = raw as IInsertEntity;
-      info.block = e.name;
+      // A dynamic block is inserted through an anonymous record; list it under
+      // the block it stands for, which is the name the drawing is read by.
+      info.block = blockNames[e.name] ?? e.name;
       if (e.position) info.position = { x: e.position.x, y: e.position.y };
       info.rotation = e.rotation ?? 0;
       info.scale = { x: e.xScale ?? 1, y: e.yScale ?? 1 };
@@ -915,6 +947,28 @@ function sanitizeBooleanFlags(text: string): string {
 }
 
 /**
+ * Adds what an object measures to the object it belongs to.
+ *
+ * An INSERT measures as the totals of the geometry it expands to, because every
+ * line inside it is collected with the INSERT as the current object. Geometry
+ * collected for a viewport is skipped: the model page already measured that
+ * geometry, at its true scale, and counting it twice would inflate every sheet.
+ */
+function recordMeasure(context: ParseContext, measure: Measure): void {
+  if (context.keep !== null || context.currentObj === null) return;
+  const object = context.objects[context.currentObj];
+  if (!object) return;
+
+  const add = (field: 'length' | 'area' | 'hatchArea', value: number | undefined) => {
+    if (value === undefined || !Number.isFinite(value) || value <= 0) return;
+    object[field] = (object[field] ?? 0) + value;
+  };
+  add('length', measure.length);
+  add('area', measure.area);
+  add('hatchArea', measure.hatchArea);
+}
+
+/**
  * Maps one raw entity into zero or more renderable entities, applying `transform`
  * (the accumulated block-insertion transform) to its geometry. INSERT entities
  * recurse into their block definition rather than producing geometry directly.
@@ -1078,38 +1132,39 @@ function mapEntity(
     case 'LINE': {
       const e = raw as ILineEntity;
       if (!e.vertices || e.vertices.length < 2) return [];
-      return [
-        {
-          type: 'LINE',
-          layer,
-          color,
-          start: applyToPoint(m, e.vertices[0]),
-          end: applyToPoint(m, e.vertices[1]),
-        },
-      ];
+      const start = applyToPoint(m, e.vertices[0]);
+      const end = applyToPoint(m, e.vertices[1]);
+      // A line stays a line under any transform, so the drawn endpoints measure
+      // exactly — no need for the block-space formula.
+      recordMeasure(context, { length: Math.hypot(end.x - start.x, end.y - start.y) });
+      return [{ type: 'LINE', layer, color, start, end }];
     }
 
     case 'CIRCLE': {
       const e = raw as ICircleEntity;
       if (isSimilarity(m)) {
+        const radius = e.radius * similarityScale(m);
+        recordMeasure(context, circleMeasure(radius));
         return [
           {
             type: 'CIRCLE',
             layer,
             color,
             center: applyToPoint(m, e.center),
-            radius: e.radius * similarityScale(m),
+            radius,
           },
         ];
       }
       // Non-uniform scaling turns the circle into an ellipse, which we
       // approximate with a polyline rather than adding an ellipse primitive.
+      const points = sampleArc(e.center, e.radius, 0, Math.PI * 2, m);
+      recordMeasure(context, sampledMeasure(points, true));
       return [
         {
           type: 'POLYLINE',
           layer,
           color,
-          points: sampleArc(e.center, e.radius, 0, Math.PI * 2, m),
+          points,
           closed: true,
         },
       ];
@@ -1121,24 +1176,28 @@ function mapEntity(
       // having to flip the start/end angles correctly.
       if (isSimilarity(m) && determinant(m) > 0) {
         const angle = rotationAngle(m);
+        const radius = e.radius * similarityScale(m);
+        recordMeasure(context, { length: arcLength(radius, e.endAngle - e.startAngle) });
         return [
           {
             type: 'ARC',
             layer,
             color,
             center: applyToPoint(m, e.center),
-            radius: e.radius * similarityScale(m),
+            radius,
             startAngle: e.startAngle + angle,
             endAngle: e.endAngle + angle,
           },
         ];
       }
+      const points = sampleArc(e.center, e.radius, e.startAngle, e.endAngle, m);
+      recordMeasure(context, sampledMeasure(points, false));
       return [
         {
           type: 'POLYLINE',
           layer,
           color,
-          points: sampleArc(e.center, e.radius, e.startAngle, e.endAngle, m),
+          points,
           closed: false,
         },
       ];
@@ -1149,13 +1208,15 @@ function mapEntity(
       if (!e.center || !e.majorAxisEndPoint) return [];
       const points = sampleEllipse(e, m);
       if (points.length < 2) return [];
+      const closed = isFullSweep(e.startAngle, e.endAngle);
+      recordMeasure(context, sampledMeasure(points, closed));
       return [
         {
           type: 'POLYLINE',
           layer,
           color,
           points,
-          closed: isFullSweep(e.startAngle, e.endAngle),
+          closed,
         },
       ];
     }
@@ -1164,12 +1225,14 @@ function mapEntity(
       const e = raw as ISolidEntity;
       const corners = solidOutline(e.points ?? []);
       if (corners.length < 3) return [];
+      const points = corners.map((p) => applyToPoint(m, p));
+      recordMeasure(context, polygonMeasure(points, true));
       return [
         {
           type: 'POLYLINE',
           layer,
           color,
-          points: corners.map((p) => applyToPoint(m, p)),
+          points,
           closed: true,
           filled: true,
         },
@@ -1181,12 +1244,14 @@ function mapEntity(
       const corners = finitePoints(e.vertices ?? []);
       if (corners.length < 3) return [];
       // Projected flat onto XY — a wireframe outline, not true 3D rendering.
+      const points = corners.map((p) => applyToPoint(m, p));
+      recordMeasure(context, polygonMeasure(points, true));
       return [
         {
           type: 'POLYLINE',
           layer,
           color,
-          points: corners.map((p) => applyToPoint(m, p)),
+          points,
           closed: true,
         },
       ];
@@ -1209,6 +1274,9 @@ function mapEntity(
         .map((loop) => finitePoints(loop).map((p) => applyToPoint(m, p)))
         .filter((loop) => loop.length >= 3);
       if (loops.length === 0) return [];
+      // Measured in its own column: the boundary it fills is usually a polyline
+      // the area column already counts.
+      recordMeasure(context, { hatchArea: hatchArea(loops) });
       return [
         {
           type: 'HATCH',
@@ -1232,12 +1300,23 @@ function mapEntity(
       );
       if (vertices.length < 2) return [];
       const closed = !!e.shape;
+      const points = expandBulges(vertices, closed).map((v) => applyToPoint(m, v));
+      // Bulge arcs stay true arcs as long as the scale is uniform, so measure
+      // them from the vertices. Otherwise measure what was drawn — and then
+      // straight from the points, with no correction for sampling: the shape is
+      // a mix of straight chords and curved pieces, and correcting it as if it
+      // were one smooth loop would inflate the straight parts by a fraction of
+      // a percent.
+      recordMeasure(
+        context,
+        isSimilarity(m) ? scaleMeasure(polylineMeasure(vertices, closed), m) : polygonMeasure(points, closed)
+      );
       return [
         {
           type: 'POLYLINE',
           layer,
           color,
-          points: expandBulges(vertices, closed).map((v) => applyToPoint(m, v)),
+          points,
           closed,
         },
       ];
@@ -1252,12 +1331,14 @@ function mapEntity(
       const fitPoints = finitePoints(e.fitPoints ?? []);
       const points = sampled.length > 0 ? sampled : fitPoints.length > 0 ? fitPoints : controlPoints;
       if (points.length < 2) return [];
+      const world = points.map((p) => applyToPoint(m, p));
+      recordMeasure(context, sampledMeasure(world, false));
       return [
         {
           type: 'POLYLINE',
           layer,
           color,
-          points: points.map((p) => applyToPoint(m, p)),
+          points: world,
           closed: false,
         },
       ];

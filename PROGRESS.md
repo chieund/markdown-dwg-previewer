@@ -2,9 +2,9 @@
 
 **Last updated:** 2026-10-07
 
-**Status:** packaged `dwg-previewer-1.0.3.vsix` (3.09 MB) — ready to upload to the Marketplace, 3 items still need confirmation in [Publishing checklist](#-publishing-checklist)
+**Status:** quantity takeoff implemented (spec `docs/superpowers/specs/2026-10-07-quantity-takeoff-design.md`) — 239 unit tests, typecheck clean. Changes are on `master`, uncommitted.
 
-**Opens:** `.dwg` and `.dxf` · **128 unit tests** · **corpus 17/17** · typecheck clean · branch `fix/review-findings` not yet merged
+**Opens:** `.dwg` and `.dxf` · **239 unit tests** · **corpus 17/17** (not re-run for this change; entity counts are untouched) · typecheck clean
 
 ---
 
@@ -146,6 +146,55 @@ because it skips both the conversion step and the memory pressure the WASM creat
 
 **6.8 s for 36K entities is an anomaly** — a real-world 45K-entity drawing takes only 640 ms.
 Most likely because this file is HATCH-heavy. Added to the backlog.
+
+---
+
+## 📦 Quantity takeoff (2026-10-07)
+
+Implements `docs/superpowers/specs/2026-10-07-quantity-takeoff-design.md`: how many of each block, how
+much linework and area per layer, without AutoCAD.
+
+### Parser
+
+- `src/dxf/measure.ts` (new, pure) — `circleMeasure`, `arcLength`, `polylineMeasure` (bulge segments
+  as true arcs, area = shoelace + the circular segment each arc adds), `polygonMeasure`,
+  `sampledMeasure`, `hatchArea` (even-odd), `scaleMeasure`
+- `src/dxf/blockNames.ts` (new) — `BLOCK_RECORD` scan resolving `*B24` → `Window` through the
+  `AcDbBlockRepBTag` xdata. Skipped entirely unless that string is in the file, so drawings without
+  dynamic blocks pay nothing for it
+- `parseDxf.ts` — measures in `mapEntity`, where the raw shape is still available, and adds to the
+  object it belongs to; an INSERT therefore measures as the totals of what it expands to, arrays
+  included. Nothing is measured while collecting for a viewport — the model page already counted it
+- `ObjectInfo.length / area / hatchArea` (drawing units, omitted when zero) and `ParsedDxf.units`
+  (`$INSUNITS`)
+
+### Webview
+
+- `src/webview/takeoff.ts` — grouping by block and by layer, hidden layers excluded
+- `src/webview/units.ts` — `$INSUNITS` → output unit; metric opens in m, imperial in ft; a drawing
+  that declares none stays in drawing units and says so
+- `src/webview/table.ts` — TSV for the clipboard, RFC 4180 CSV for the file
+- `src/webview/takeoffPanel.ts` — Blocks / Layers tabs, ⌖ per row, Copy table, Export CSV
+- `main.ts` — *Quantities* button, Shift+click multi-selection, selection totals in the status bar;
+  host gained `EXPORT` format `csv` and a `COPY` message for when the webview is denied the clipboard
+
+### Notes for whoever picks this up next
+
+- **Sampled curves are corrected, not measured raw.** An ellipse sampled into 64 chords encloses
+  0.16 % *less* than the ellipse, and `sampledMeasure` divides that error back out; without it the
+  area of a floor was quietly low.
+- **`hatchArea` ignores loop direction.** A mirrored block flips every loop at once, so the
+  even-odd rule has to run on unsigned areas or a mirrored hatch with a hole comes out as the *sum*
+  of both loops.
+- A block's inner geometry on layer 0 is counted on the INSERT's layer, which is what the layer
+  panel shows — but a block drawn partly on hidden inner layers is still counted in full, because
+  `ObjectInfo` records one layer per object.
+- Verified end to end on a synthetic drawing (`$INSUNITS = 4`): a 12 600-unit wall reads 12.60 m,
+  a 6 000 × 4 000 hatch reads 24 000.00 m², a door inserted at ×2 reads twice the length of the
+  same block at ×1, and hiding the hatch's layer drops it from the totals.
+- `npm run test:corpus` was **not** re-run: the corpus of AutoCAD samples is not on this machine.
+  Nothing in the change touches the entity pipeline, so the counts the baseline records are expected
+  to match — worth confirming before publishing.
 
 ---
 
@@ -397,6 +446,8 @@ markdown-dwg-previewer/
     │   ├── types.ts          ← re-export from shared/types.ts
     │   ├── hatch.ts
     │   ├── viewport.ts
+    │   ├── measure.ts        ← length / area / hatch area of raw shapes
+    │   ├── blockNames.ts     ← dynamic block → the block it represents
     │   ├── bulge.ts
     │   ├── spline.ts
     │   └── matrix.ts         ← 2D affine + extrusionMatrix (OCS)
@@ -407,6 +458,10 @@ markdown-dwg-previewer/
         ├── panZoom.ts
         ├── export.ts
         ├── sceneState.ts     ← initially hidden layers, state kept on reload
+        ├── takeoff.ts        ← block / layer quantities from the object table
+        ├── takeoffPanel.ts   ← the Quantities panel (DOM only)
+        ├── units.ts          ← $INSUNITS → metres, formatting
+        ├── table.ts          ← rows → TSV / CSV
         └── layerIndex.ts     ← elements by layer, toggled via display
 ```
 
@@ -419,7 +474,7 @@ npm install          # Install dependencies
 npm run build        # Build extension + webview
 npm run watch        # Watch mode
 npm run typecheck    # TypeScript check
-npm test             # 128 unit tests (node:test, no external dependencies)
+npm test             # 239 unit tests (node:test, no external dependencies)
 
 # Corpus test — runs the real pipeline over a whole .dwg directory
 npm run test:corpus -- <corpus-dir>          # compare against the baseline
@@ -432,6 +487,8 @@ npm run preview -- <file.dwg|file.dxf>
 npm run preview -- <file> --layers    # open the layer panel
 npm run preview -- <file> --filter    # layer panel with an active filter
 npm run preview -- <file> --hidden    # all layers hidden state
+npm run preview -- <file> --quantities         # the Quantities panel
+npm run preview -- <file> --quantities-layers  # … on its Layers tab
 
 python3 assets/make-icon.py   # Regenerate icon.png + preview images
 ```
@@ -441,6 +498,15 @@ View conversion logs: **View → Output → select "DWG Previewer"** in the drop
 ---
 
 ## 📝 Changelog
+
+### 2026-10-07 · unreleased · Quantity takeoff
+- **Quantities panel**: *Quantities* counts every block under its real name (`Door-900`, not `*B24`) and measures each layer's objects, length, area and hatch area
+- Exact where the shape allows it: circles, arcs and bulge segments use their real formulas; ellipses and sampled splines are corrected for the polygon they were sampled into
+- Shift+click builds a multi-selection; the status bar totals its length and area. ⌖ on a row selects those objects and zooms to them
+- Units come from `$INSUNITS` — metric drawings open in m, imperial in ft, and a drawing that declares none stays in drawing units instead of guessing
+- Copy table (TSV) pastes as cells in Excel; Export CSV writes UTF-8 with a BOM so accents survive
+- Hatches keep their own area column: the polyline they fill is already counted in "Area"
+- 183 → 239 unit tests
 
 ### 2026-10-07 · unreleased · Visual diff
 - **Compare drawings**: *DWG: Compare with HEAD* (Explorer, editor title button, Source Control changes), *Compare with File…*, *Compare Selected Drawings* (two files in Explorer)

@@ -101,6 +101,18 @@ function interactionScript(action: string | undefined): string {
   if (action === 'layers') {
     return `document.querySelector('.dwg-layer-button')?.click();`;
   }
+  if (action === 'quantities') {
+    return `[...document.querySelectorAll('.dwg-toolbar button')]
+      .find((b) => b.textContent === 'Quantities')?.click();`;
+  }
+  if (action === 'quantities-layers') {
+    // The quantities panel, on its Layers tab — the columns worth showing
+    return `
+      [...document.querySelectorAll('.dwg-toolbar button')]
+        .find((b) => b.textContent === 'Quantities')?.click();
+      [...document.querySelectorAll('.dwg-takeoff-tab')]
+        .find((b) => b.textContent === 'Layers')?.click();`;
+  }
   if (action === 'filter') {
     return `
       document.querySelector('.dwg-layer-button')?.click();

@@ -18,6 +18,10 @@ import { pickObject } from './pick';
 import { buildInspector } from './inspector';
 import { SearchControl, buildSearchControl } from './searchPanel';
 import type { SearchHit } from './search';
+import { TakeoffPanel, buildTakeoffPanel } from './takeoffPanel';
+import { EMPTY_TAKEOFF, measureSelection, takeOff } from './takeoff';
+import { Unit, convert, defaultUnit, formatArea, formatLength } from './units';
+import { UTF8_BOM } from './table';
 import type { DrawingDiff, ObjectInfo } from '../shared/types';
 import { renderDiff } from './diffView';
 
@@ -31,6 +35,8 @@ interface Scene {
   hiddenLayers: Set<string>;
   pageIndex: number;
   skippedEntityTypes: string[];
+  /** `$INSUNITS` of the drawing, if it declares one. */
+  insunits?: number;
 }
 
 let scene: Scene | null = null;
@@ -65,6 +71,9 @@ let contentGroup: SVGGElement | null = null;
 let highlightGroup: SVGGElement | null = null;
 let inspector: HTMLElement | null = null;
 let searchControl: SearchControl | null = null;
+let takeoffPanel: TakeoffPanel | null = null;
+/** Unit the quantities panel and the status bar show; from the drawing, then the user. */
+let outputUnit: Unit | undefined;
 
 /** A selection of a whole layer can hold tens of thousands of elements; copying them all would stall. */
 const MAX_HIGHLIGHTED_ELEMENTS = 20_000;
@@ -196,7 +205,11 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
     if (moved > CLICK_SLOP_PX) return;
     const picked = pickAt(svg, event.clientX, event.clientY);
     if (picked === undefined) clearSelection();
-    else select([picked], { zoom: false, inspect: true });
+    else if (event.shiftKey) {
+      // Shift+click builds a multi-selection to measure, without the inspector
+      // taking over from the quantities panel.
+      select(toggleInSelection(picked), { zoom: false, inspect: false });
+    } else select([picked], { zoom: false, inspect: true });
   });
 
   emptyState = null;
@@ -213,6 +226,8 @@ function applyLayerVisibility(): void {
   layerIndex.apply(scene.hiddenLayers);
   refreshVisibleCount(scene.pages[scene.pageIndex], scene.hiddenLayers);
   if (selection.length) refreshHighlight();
+  // The panel measures what the screen shows, so hidden layers leave the totals.
+  takeoffPanel?.refresh();
 }
 
 function refreshVisibleCount(page: DxfPage, hiddenLayers: Set<string>): void {
@@ -306,6 +321,7 @@ function goToPage(index: number): void {
   if (pageSelect) pageSelect.value = String(index);
   refreshLayerControl();
   redraw(false);
+  takeoffPanel?.refresh();
 }
 
 /** The object under a click: measured in drawing coordinates, within a few pixels of tolerance. */
@@ -315,6 +331,11 @@ function pickAt(svg: SVGSVGElement, clientX: number, clientY: number): number | 
   const pixel = unitsPerPixel(svg);
   // The scene is drawn through a scale(1,-1) flip
   return pickObject(scene.pages[scene.pageIndex], { x: point.x, y: -point.y }, PICK_RADIUS_PX * pixel, scene.hiddenLayers);
+}
+
+/** Adds an object to the selection, or takes it out again if it is already in. */
+function toggleInSelection(obj: number): number[] {
+  return selection.includes(obj) ? selection.filter((picked) => picked !== obj) : [...selection, obj];
 }
 
 /** Selects objects: dims the rest, highlights them, and optionally zooms to them and opens the inspector. */
@@ -336,7 +357,6 @@ function select(objs: number[], options: { zoom: boolean; inspect: boolean }): v
         view.h *= grow;
       }
       applyViewBox(activeSvg, view);
-      updateStatusBar();
     }
   }
 
@@ -350,6 +370,9 @@ function select(objs: number[], options: { zoom: boolean; inspect: boolean }): v
       canvasHost.appendChild(inspector);
     }
   }
+  // The status bar carries what the selection measures, so it follows a plain
+  // click and a shift+click just as it follows a zoom.
+  updateStatusBar();
 }
 
 function clearSelection(): void {
@@ -358,6 +381,7 @@ function clearSelection(): void {
   refreshHighlight();
   inspector?.remove();
   inspector = null;
+  updateStatusBar();
 }
 
 /**
@@ -483,6 +507,21 @@ function updateStatusBar(): void {
   }
 
   statusBar.appendChild(span(`${visibleEntityCount.toLocaleString()} objects`));
+
+  // What the current selection measures, so a number on screen can always be
+  // traced back to the objects it came from.
+  if (selection.length > 0) {
+    const totals = measureSelection(objects, selection);
+    const unit = outputUnit;
+    const insunits = scene?.insunits;
+    const parts = [`${selection.length} selected`];
+    const length = convert(totals.length, insunits, unit);
+    const area = convert(totals.area, insunits, unit);
+    if (length > 0) parts.push(`length ${formatLength(length, unit)}`);
+    if (area > 0) parts.push(`area ${formatArea(area, unit)}`);
+    statusBar.appendChild(span(parts.join(' · '), 'dwg-status-selection'));
+  }
+
   statusBar.appendChild(span('', 'dwg-status-spacer'));
   statusBar.appendChild(span('Scroll = zoom · Drag = pan · Double-click = fit', 'dwg-status-hint'));
 }
@@ -705,6 +744,76 @@ function buildLayerControl(scene: Scene): HTMLElement | null {
   return wrapper;
 }
 
+/** The quantities of what is on screen, hidden layers left out. */
+function currentTakeoff() {
+  if (!scene) return EMPTY_TAKEOFF;
+  return takeOff(objects, scene.pageIndex, scene.hiddenLayers);
+}
+
+/**
+ * Opens the quantities panel, or closes it if it is already open.
+ *
+ * It and the inspector both describe the selection, and two panels over one
+ * canvas only get in each other's way, so opening one closes the other.
+ */
+function toggleTakeoffPanel(): void {
+  if (takeoffPanel) {
+    closeTakeoffPanel();
+    return;
+  }
+  if (!canvasHost) return;
+
+  inspector?.remove();
+  inspector = null;
+  outputUnit = defaultUnit(scene?.insunits);
+
+  takeoffPanel = buildTakeoffPanel({
+    pageName: () => scene?.pages[scene.pageIndex].name ?? '',
+    insunits: scene?.insunits,
+    unit: () => outputUnit,
+    onUnitChange: (unit) => {
+      outputUnit = unit;
+      updateStatusBar();
+    },
+    compute: currentTakeoff,
+    // Selecting from the panel zooms in; there is nothing to describe, since a
+    // layer or a block is not one object.
+    onSelect: (objs) => select(objs, { zoom: true, inspect: false }),
+    onClose: closeTakeoffPanel,
+    onCopy: copyToClipboard,
+    // The BOM travels with the text: Excel reads a CSV without it as ANSI and
+    // turns every accented layer name into mojibake.
+    onExportCsv: (text) => vscodeApi.postMessage({ type: 'EXPORT', format: 'csv', data: UTF8_BOM + text }),
+  });
+  canvasHost.appendChild(takeoffPanel.element);
+}
+
+function closeTakeoffPanel(): void {
+  takeoffPanel?.element.remove();
+  takeoffPanel = null;
+}
+
+/**
+ * Puts text on the clipboard. The webview may be denied it — then the host
+ * writes it, which always works.
+ */
+async function copyToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    vscodeApi.postMessage({ type: 'COPY', text });
+  }
+}
+
+function buildTakeoffButton(): HTMLElement {
+  const button = document.createElement('button');
+  button.className = 'dwg-layer-button';
+  button.textContent = 'Quantities';
+  button.title = 'Count blocks and measure length and area on this sheet';
+  button.addEventListener('click', toggleTakeoffPanel);
+  return button;
+}
+
 function buildExportControls(): HTMLElement {
   const group = document.createElement('div');
   group.className = 'dwg-export';
@@ -761,11 +870,14 @@ function renderScene(
   pages: DxfPage[],
   skippedEntityTypes: string[],
   warnings: string[] = [],
-  drawingObjects: ObjectInfo[] = []
+  drawingObjects: ObjectInfo[] = [],
+  insunits?: number
 ) {
   objects = drawingObjects;
   selection = [];
   inspector = null;
+  takeoffPanel = null;
+  outputUnit = defaultUnit(insunits);
   // A reload (the file was saved again) keeps the user's page, layers and zoom.
   const previous = scene;
   const previousView = activeSvg ? getViewBox(activeSvg) : null;
@@ -773,7 +885,7 @@ function renderScene(
     ? carryOverView({ pageName: previous.pages[previous.pageIndex]?.name, hiddenLayers: previous.hiddenLayers }, pages)
     : { pageIndex: 0, hiddenLayers: initialHiddenLayers(pages), keepView: false };
 
-  scene = { pages, hiddenLayers: carried.hiddenLayers, pageIndex: carried.pageIndex, skippedEntityTypes };
+  scene = { pages, hiddenLayers: carried.hiddenLayers, pageIndex: carried.pageIndex, skippedEntityTypes, insunits };
   activeSvg = null;
   pageSelect = null;
   statusBar = null;
@@ -797,6 +909,7 @@ function renderScene(
     buildPageSelect(scene),
     layerSlot,
     searchControl.element,
+    buildTakeoffButton(),
     buildZoomControls(),
     buildExportControls(),
     buildSkippedBanner(skippedEntityTypes),
@@ -850,14 +963,14 @@ function showError(message: string) {
 
 window.addEventListener('message', (event) => {
   const message = event.data as
-    | { type: 'DXF_DATA'; pages: DxfPage[]; skippedEntityTypes: string[]; warnings?: string[]; objects?: ObjectInfo[] }
+    | { type: 'DXF_DATA'; pages: DxfPage[]; skippedEntityTypes: string[]; warnings?: string[]; objects?: ObjectInfo[]; units?: number }
     | { type: 'DXF_ERROR'; message: string }
     | { type: 'DIFF_DATA'; diff: DrawingDiff }
     | { type: 'DXF_PROGRESS'; stage: string };
 
   if (message.type === 'DXF_DATA') {
     try {
-      renderScene(message.pages, message.skippedEntityTypes, message.warnings, message.objects);
+      renderScene(message.pages, message.skippedEntityTypes, message.warnings, message.objects, message.units);
     } catch (err) {
       showError(`Error rendering drawing:\n${describe(err)}`);
     }
@@ -883,6 +996,7 @@ window.addEventListener('keydown', (event) => {
     searchControl.open();
   } else if (event.key === 'Escape') {
     if (searchControl?.isOpen()) searchControl.close();
+    else if (takeoffPanel) closeTakeoffPanel();
     else clearSelection();
   }
 });

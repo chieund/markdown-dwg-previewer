@@ -146,6 +146,17 @@ export interface ObjectInfo {
   attributes?: Attribute[];
   /** TEXT, MTEXT and DIMENSION: the text as displayed. */
   text?: string;
+  /**
+   * What the object measures, in drawing units — an INSERT carries the totals
+   * of the geometry it expands to. Zero values are left out.
+   *
+   * `hatchArea` is kept apart from `area`: a hatch normally fills a closed
+   * polyline that `area` already counts, and adding them would count the floor
+   * twice.
+   */
+  length?: number;
+  area?: number;
+  hatchArea?: number;
   /** Nothing was drawn for it (invisible, unsupported, or cut off by the entity limit). */
   empty?: true;
 }
@@ -156,6 +167,12 @@ export interface ParsedDxf {
   skippedEntityTypes: string[];
   /** Problems worth telling the user about, e.g. a drawing cut short at the entity limit. */
   warnings?: string[];
+  /**
+   * `$INSUNITS`: what one drawing unit is worth, as the DXF reference numbers
+   * them (4 = mm, 5 = cm, 6 = m, 1 = inch, 2 = foot …). Left out when the file
+   * declares none, which is the normal case for R12 and for many drawings.
+   */
+  units?: number;
 }
 
 export type ChangeKind = 'added' | 'removed' | 'changed';
