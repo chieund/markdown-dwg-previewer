@@ -79,10 +79,14 @@ test('a circle measures its circumference and its disc', () => {
   near(measure.area, Math.PI * 4);
 });
 
-test('an arc measures radius × sweep', () => {
-  near(arcLength(3, Math.PI / 2), 3 * Math.PI / 2);
-  // Direction does not change how long a curve is.
-  near(arcLength(3, -Math.PI / 2), 3 * Math.PI / 2);
+test('an arc measures radius × its counter-clockwise sweep', () => {
+  near(arcLength(3, 0, Math.PI / 2), 3 * Math.PI / 2);
+  // DXF arcs run counter-clockwise, so 300° → 30° sweeps 90°, not 270°.
+  near(arcLength(3, (5 * Math.PI) / 3, Math.PI / 6), 3 * Math.PI / 2);
+  // Equal angles are a full turn, as AutoCAD draws them.
+  near(arcLength(1, 1, 1), 2 * Math.PI);
+  // A corrupt angle must not hang the parser.
+  assert.ok(Number.isFinite(arcLength(1, -1e300, 0)));
 });
 
 test('a bulge of 1 is a semicircle: the arc is πr long and encloses πr²/2', () => {
@@ -191,6 +195,14 @@ test('a CIRCLE measures circumference and area, an ARC only its length', () => {
   near(circle.area, Math.PI);
   near(arc.length, Math.PI);
   assert.equal(arc.area, undefined);
+});
+
+test('an ARC crossing 0° measures the short way round, the way it is drawn', () => {
+  const text = withLayers(
+    [layer('0', 7)],
+    ...entities('0', 'ARC', '8', '0', '10', '0', '20', '0', '30', '0', '40', '1', '50', '300', '51', '30')
+  );
+  near(modelObjects(text)[0].length, Math.PI / 2);
 });
 
 test('a closed LWPOLYLINE measures its perimeter and its enclosed area', () => {

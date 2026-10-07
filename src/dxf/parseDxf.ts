@@ -39,6 +39,7 @@ import { scanHatches } from './hatch';
 import {
   Measure,
   arcLength,
+  arcSweep,
   circleMeasure,
   hatchArea,
   polylineMeasure,
@@ -1177,7 +1178,7 @@ function mapEntity(
       if (isSimilarity(m) && determinant(m) > 0) {
         const angle = rotationAngle(m);
         const radius = e.radius * similarityScale(m);
-        recordMeasure(context, { length: arcLength(radius, e.endAngle - e.startAngle) });
+        recordMeasure(context, { length: arcLength(radius, e.startAngle, e.endAngle) });
         return [
           {
             type: 'ARC',
@@ -1529,8 +1530,8 @@ function sampleEllipse(e: IEllipseEntity, m: Matrix2D): Point2D[] {
   const start = e.startAngle ?? 0;
   const end = e.endAngle ?? Math.PI * 2;
 
-  let sweep = end - start;
-  if (sweep <= 0) sweep += Math.PI * 2;
+  const sweep = arcSweep(start, end);
+  if (!Number.isFinite(sweep)) return [];
 
   const segments = Math.max(8, Math.ceil((sweep / (Math.PI * 2)) * CIRCLE_SAMPLE_SEGMENTS));
   const points: Point2D[] = [];
@@ -1572,8 +1573,8 @@ function sampleArc(
   endAngle: number,
   m: Matrix2D
 ): Point2D[] {
-  let sweep = endAngle - startAngle;
-  while (sweep <= 0) sweep += Math.PI * 2;
+  const sweep = arcSweep(startAngle, endAngle);
+  if (!Number.isFinite(sweep)) return [];
 
   const segments = Math.max(4, Math.ceil((sweep / (Math.PI * 2)) * CIRCLE_SAMPLE_SEGMENTS));
   const points: Point2D[] = [];

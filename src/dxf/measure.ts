@@ -34,11 +34,24 @@ export function circleMeasure(radius: number): Measure {
 }
 
 /**
- * Length of an arc. Angles are in radians, as DXF hands them over; a sweep
- * running backwards measures the same as one running forwards.
+ * Length of an arc. Angles are in radians, as DXF hands them over, and the arc
+ * runs counter-clockwise from start to end — so 300° → 30° sweeps 90°, not the
+ * 270° a plain difference gives. Equal angles are a full turn, matching how the
+ * renderer samples them.
  */
-export function arcLength(radius: number, sweep: number): number {
-  return radius * Math.abs(sweep);
+export function arcLength(radius: number, startAngle: number, endAngle: number): number {
+  return radius * arcSweep(startAngle, endAngle);
+}
+
+/**
+ * Counter-clockwise sweep from one angle to another, in (0, 2π]. A remainder
+ * rather than a loop adding 2π: a corrupt angle like -1e300 would otherwise
+ * never get there.
+ */
+export function arcSweep(startAngle: number, endAngle: number): number {
+  const turn = Math.PI * 2;
+  const sweep = (((endAngle - startAngle) % turn) + turn) % turn;
+  return sweep === 0 ? turn : sweep;
 }
 
 /**
