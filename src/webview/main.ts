@@ -109,6 +109,10 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
   disposeActivePanZoom?.();
   disposeActivePanZoom = null;
   host.innerHTML = '';
+  // The quantities panel lives over the canvas and outlasts a redraw (a page
+  // switch, say); clearing it out of the DOM left it "open" but gone, so the
+  // next press of Quantities closed it instead of showing it.
+  if (takeoffPanel) host.appendChild(takeoffPanel.element);
 
   const svg = document.createElementNS(SVG_NS, 'svg') as SVGSVGElement;
   svg.setAttribute('width', '100%');
@@ -764,12 +768,26 @@ function currentTakeoff() {
  * canvas only get in each other's way, so opening one closes the other.
  */
 function toggleTakeoffPanel(): void {
-  if (takeoffPanel) {
+  // Open means on screen: a panel no longer in the page is opened afresh.
+  if (takeoffPanel?.element.isConnected) {
     closeTakeoffPanel();
     return;
   }
+  takeoffPanel = null;
   if (!canvasHost) return;
+  try {
+    openTakeoffPanel(canvasHost);
+  } catch (err) {
+    // A button that does nothing is the worst outcome; say what went wrong.
+    // TypeScript cannot see openTakeoffPanel setting it before the throw
+    (takeoffPanel as TakeoffPanel | null)?.element.remove();
+    takeoffPanel = null;
+    console.error(err);
+    showToolbarNotice(`Quantities failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
 
+function openTakeoffPanel(host: HTMLElement): void {
   inspector?.remove();
   inspector = null;
 
@@ -798,7 +816,7 @@ function toggleTakeoffPanel(): void {
     // turns every accented layer name into mojibake.
     onExportCsv: (text) => vscodeApi.postMessage({ type: 'EXPORT', format: 'csv', data: UTF8_BOM + text }),
   });
-  canvasHost.appendChild(takeoffPanel.element);
+  host.appendChild(takeoffPanel.element);
 }
 
 function closeTakeoffPanel(): void {
@@ -956,9 +974,14 @@ let toolbarEl: HTMLElement | null = null;
  * drawing the user is looking at with an error page; the next save will fix it.
  */
 function showReloadError(message: string) {
+  showToolbarNotice(`Reload failed — showing the previous version. ${message.split('\n')[0]}`);
+}
+
+/** One dismissible notice on the toolbar, replacing the previous one. */
+function showToolbarNotice(text: string) {
   if (!toolbarEl) return;
   toolbarEl.querySelector('.dwg-reload-error')?.remove();
-  const banner = buildBanner(`Reload failed — showing the previous version. ${message.split('\n')[0]}`);
+  const banner = buildBanner(text);
   banner.classList.add('dwg-reload-error');
   toolbarEl.appendChild(banner);
 }
