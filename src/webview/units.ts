@@ -59,15 +59,33 @@ export const OUTPUT_UNITS: Unit[] = [
  * numbers in drawing units until the user picks something.
  */
 export function defaultUnit(insunits: number | undefined): Unit | undefined {
-  if (insunits === undefined || METRES_PER_UNIT[insunits] === undefined) return undefined;
-  const wanted = IMPERIAL_CODES.has(insunits) ? 'ft' : 'm';
+  const known = knownUnits(insunits);
+  if (known === undefined) return undefined;
+  const wanted = IMPERIAL_CODES.has(known) ? 'ft' : 'm';
   return OUTPUT_UNITS.find((unit) => unit.id === wanted);
 }
 
-/** How long one drawing unit is in metres, for converting a measurement. */
-export function metresPerDrawingUnit(insunits: number | undefined): number {
-  if (insunits === undefined) return 1;
-  return METRES_PER_UNIT[insunits] ?? 1;
+/** `insunits` if it names a unit this file can convert from, otherwise undefined. */
+export function knownUnits(insunits: number | undefined): number | undefined {
+  return insunits !== undefined && METRES_PER_UNIT[insunits] !== undefined ? insunits : undefined;
+}
+
+/**
+ * What a user can say a drawing's unit is when the file does not: the units
+ * drawings are actually made in, as `$INSUNITS` codes.
+ */
+export const DECLARABLE_UNITS: { code: number; label: string }[] = [
+  { code: 4, label: 'mm' },
+  { code: 5, label: 'cm' },
+  { code: 6, label: 'm' },
+  { code: 1, label: 'in' },
+  { code: 2, label: 'ft' },
+];
+
+/** How long one drawing unit is in metres, or undefined when nobody has said. */
+export function metresPerDrawingUnit(insunits: number | undefined): number | undefined {
+  const known = knownUnits(insunits);
+  return known === undefined ? undefined : METRES_PER_UNIT[known];
 }
 
 /**
@@ -78,7 +96,13 @@ export function metresPerDrawingUnit(insunits: number | undefined): number {
  * quietly inflating every floor area by the linear scale.
  */
 function scale(insunits: number | undefined, unit: Unit | undefined): number {
-  return metresPerDrawingUnit(insunits) / (unit?.metres ?? 1);
+  // Left in drawing units, the numbers are what the file stores.
+  if (!unit) return 1;
+  // Converting needs both ends. Assuming the drawing is in metres would be a
+  // guess, and a wrong one by a factor of a thousand for most floor plans —
+  // NaN shows as an em dash instead.
+  const metres = metresPerDrawingUnit(insunits);
+  return metres === undefined ? NaN : metres / unit.metres;
 }
 
 /** Converts a length from drawing units into the chosen output unit. */
@@ -94,6 +118,12 @@ export function convertArea(value: number, insunits: number | undefined, unit: U
 
 /** Shown wherever a column has nothing to report. */
 export const NO_VALUE = '—';
+
+/** `24.60`, or an em dash when there is nothing to show — for a cell whose column names the unit. */
+export function formatNumber(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value) || value === 0) return NO_VALUE;
+  return value.toFixed(2);
+}
 
 /** `24.60 m`, or an em dash when there is nothing to show. */
 export function formatLength(value: number | undefined, unit: Unit | undefined): string {

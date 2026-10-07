@@ -20,7 +20,7 @@ import { SearchControl, buildSearchControl } from './searchPanel';
 import type { SearchHit } from './search';
 import { TakeoffPanel, buildTakeoffPanel } from './takeoffPanel';
 import { EMPTY_TAKEOFF, measureSelection, takeOff } from './takeoff';
-import { Unit, convertArea, convertLength, defaultUnit, formatArea, formatLength } from './units';
+import { Unit, convertArea, convertLength, defaultUnit, formatArea, formatLength, knownUnits } from './units';
 import { UTF8_BOM } from './table';
 import type { DrawingDiff, ObjectInfo } from '../shared/types';
 import { renderDiff } from './diffView';
@@ -74,6 +74,13 @@ let searchControl: SearchControl | null = null;
 let takeoffPanel: TakeoffPanel | null = null;
 /** Unit the quantities panel and the status bar show; from the drawing, then the user. */
 let outputUnit: Unit | undefined;
+/** What the user said a drawing that declares no unit is drawn in. */
+let assumedUnits: number | undefined;
+
+/** The drawing's unit as an `$INSUNITS` code: the file's own, else the user's word for it. */
+function drawingUnits(): number | undefined {
+  return knownUnits(scene?.insunits) ?? assumedUnits;
+}
 
 /** A selection of a whole layer can hold tens of thousands of elements; copying them all would stall. */
 const MAX_HIGHLIGHTED_ELEMENTS = 20_000;
@@ -513,7 +520,7 @@ function updateStatusBar(): void {
   if (selection.length > 0) {
     const totals = measureSelection(objects, selection);
     const unit = outputUnit;
-    const insunits = scene?.insunits;
+    const insunits = drawingUnits();
     const parts = [`${selection.length} selected`];
     const length = convertLength(totals.length, insunits, unit);
     const area = convertArea(totals.area, insunits, unit);
@@ -765,11 +772,17 @@ function toggleTakeoffPanel(): void {
 
   inspector?.remove();
   inspector = null;
-  outputUnit = defaultUnit(scene?.insunits);
 
   takeoffPanel = buildTakeoffPanel({
     pageName: () => scene?.pages[scene.pageIndex].name ?? '',
-    insunits: scene?.insunits,
+    declaredUnits: knownUnits(scene?.insunits),
+    drawingUnits,
+    onDrawingUnitsChange: (insunits) => {
+      assumedUnits = insunits;
+      // Millimetres convert to metres, inches to feet — as a declared unit would.
+      outputUnit = defaultUnit(insunits);
+      updateStatusBar();
+    },
     unit: () => outputUnit,
     onUnitChange: (unit) => {
       outputUnit = unit;
@@ -877,9 +890,12 @@ function renderScene(
   selection = [];
   inspector = null;
   takeoffPanel = null;
-  outputUnit = defaultUnit(insunits);
-  // A reload (the file was saved again) keeps the user's page, layers and zoom.
+  // A reload (the file was saved again) keeps the user's page, layers, zoom and units.
   const previous = scene;
+  if (!previous || previous.insunits !== insunits) {
+    assumedUnits = undefined;
+    outputUnit = defaultUnit(insunits);
+  }
   const previousView = activeSvg ? getViewBox(activeSvg) : null;
   const carried = previous
     ? carryOverView({ pageName: previous.pages[previous.pageIndex]?.name, hiddenLayers: previous.hiddenLayers }, pages)

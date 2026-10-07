@@ -7,15 +7,19 @@
  * way. Every row can select its objects, which is what makes the numbers
  * checkable: the estimator can jump to the fourteen doors and count them.
  */
-import { DRAWING_UNITS, NO_VALUE, OUTPUT_UNITS, Unit, convertArea, convertLength, formatArea, formatLength } from './units';
+import { DECLARABLE_UNITS, NO_VALUE, OUTPUT_UNITS, Unit, convertArea, convertLength, formatArea, formatLength, formatNumber } from './units';
 import { toCsv, toTsv } from './table';
 import { EMPTY_TAKEOFF, Takeoff } from './takeoff';
 
 export interface TakeoffPanelOptions {
   /** Name of the page being measured, for the panel header. */
   pageName(): string;
-  /** `$INSUNITS` of the drawing, if it declares one. */
-  insunits: number | undefined;
+  /** `$INSUNITS` the file declares, when it is a unit that converts. */
+  declaredUnits: number | undefined;
+  /** The drawing's unit: the declared one, or what the user said it is. */
+  drawingUnits(): number | undefined;
+  /** The user said what a drawing that declares nothing is drawn in. */
+  onDrawingUnitsChange(insunits: number | undefined): void;
   /** Unit currently chosen; the panel does not own it, so the status bar agrees. */
   unit(): Unit | undefined;
   onUnitChange(unit: Unit): void;
@@ -46,11 +50,10 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
   let tab: Tab = 'blocks';
   let takeoff: Takeoff = EMPTY_TAKEOFF;
 
-  const unitLabel = () => (options.unit() ?? DRAWING_UNITS).label;
   /** A length in drawing units, converted for display and export. */
-  const toLength = (value: number) => convertLength(value, options.insunits, options.unit());
+  const toLength = (value: number) => convertLength(value, options.drawingUnits(), options.unit());
   /** An area in drawing units², converted for display and export. */
-  const toArea = (value: number) => convertArea(value, options.insunits, options.unit());
+  const toArea = (value: number) => convertArea(value, options.drawingUnits(), options.unit());
 
   // ── Header ────────────────────────────────────────────────────────────────
 
@@ -64,20 +67,24 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
   unitSelect.className = 'dwg-takeoff-units';
   unitSelect.title = 'Unit the numbers are shown and exported in';
   unitSelect.setAttribute('aria-label', 'Output unit');
-  // A drawing that declares no unit offers "Drawing units" as an explicit
-  // choice rather than falling silently back to metres.
-  for (const choice of options.unit() ? OUTPUT_UNITS : [DRAWING_UNITS, ...OUTPUT_UNITS]) {
+  for (const choice of OUTPUT_UNITS) {
     const option = document.createElement('option');
     option.value = choice.id;
     option.textContent = choice.label;
     unitSelect.appendChild(option);
   }
-  unitSelect.value = options.unit()?.id ?? DRAWING_UNITS.id;
   unitSelect.addEventListener('change', () => {
-    const chosen = [...OUTPUT_UNITS, DRAWING_UNITS].find((choice) => choice.id === unitSelect.value);
+    const chosen = OUTPUT_UNITS.find((choice) => choice.id === unitSelect.value);
     if (chosen) options.onUnitChange(chosen);
     render();
   });
+  /** Converting needs to know the drawing's unit; until then there is nothing to choose. */
+  const syncUnitSelect = () => {
+    const unit = options.unit();
+    unitSelect.hidden = options.drawingUnits() === undefined || !unit;
+    if (unit) unitSelect.value = unit.id;
+  };
+  syncUnitSelect();
 
   const close = document.createElement('button');
   close.className = 'dwg-inspector-close';
@@ -89,11 +96,41 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
   header.append(title, unitSelect, close);
   panel.appendChild(header);
 
-  // Never guessed: the numbers only mean something once the unit is known.
+  // Never guessed: a drawing that does not declare its unit stays in drawing
+  // units until the user says what one of them is.
   const unitHint = document.createElement('div');
   unitHint.className = 'dwg-takeoff-hint';
-  unitHint.hidden = options.insunits !== undefined;
-  unitHint.textContent = 'This drawing does not declare a unit — the numbers are in drawing units.';
+  unitHint.hidden = options.declaredUnits !== undefined;
+  const hintText = document.createElement('span');
+  const declare = document.createElement('select');
+  declare.className = 'dwg-takeoff-units';
+  declare.title = 'What one drawing unit is — the file does not say';
+  declare.setAttribute('aria-label', 'Drawing unit');
+  const notSet = document.createElement('option');
+  notSet.value = '';
+  notSet.textContent = '1 unit = ?';
+  declare.appendChild(notSet);
+  for (const { code, label } of DECLARABLE_UNITS) {
+    const option = document.createElement('option');
+    option.value = String(code);
+    option.textContent = `1 unit = 1 ${label}`;
+    declare.appendChild(option);
+  }
+  declare.value = options.declaredUnits === undefined ? String(options.drawingUnits() ?? '') : '';
+  const syncHint = () => {
+    hintText.textContent =
+      options.drawingUnits() === undefined
+        ? 'This drawing does not declare a unit — the numbers are in drawing units. '
+        : 'This drawing does not declare a unit — converted from the unit you chose. ';
+  };
+  declare.addEventListener('change', () => {
+    options.onDrawingUnitsChange(declare.value ? Number(declare.value) : undefined);
+    syncHint();
+    syncUnitSelect();
+    render();
+  });
+  syncHint();
+  unitHint.append(hintText, declare);
   panel.appendChild(unitHint);
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
@@ -132,17 +169,15 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
         rows: takeoff.blocks.map((row) => ({ cells: [row.name, String(row.count)], objects: row.objects })),
       };
     }
-    const label = unitLabel();
+    // "Drawing units" after every number, or in every heading, crowds the table
+    // off the panel; in drawing units the hint above the table says so once.
+    const length = (value: number) => (unit ? formatLength(toLength(value), unit) : formatNumber(value));
+    const area = (value: number) => (unit ? formatArea(toArea(value), unit) : formatNumber(value));
+    const per = (suffix: string) => (unit ? ` (${unit.label}${suffix})` : '');
     return {
-      labels: ['Layer', 'Objects', `Length (${label})`, `Area (${label}²)`, `Hatch area (${label}²)`],
+      labels: ['Layer', 'Objects', `Length${per('')}`, `Area${per('²')}`, `Hatch area${per('²')}`],
       rows: takeoff.layers.map((row) => ({
-        cells: [
-          row.name,
-          String(row.count),
-          formatLength(toLength(row.length), unit),
-          formatArea(toArea(row.area), unit),
-          formatArea(toArea(row.hatchArea), unit),
-        ],
+        cells: [row.name, String(row.count), length(row.length), area(row.area), area(row.hatchArea)],
         objects: row.objects,
       })),
     };

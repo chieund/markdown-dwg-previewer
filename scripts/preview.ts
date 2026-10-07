@@ -113,6 +113,17 @@ function interactionScript(action: string | undefined): string {
       [...document.querySelectorAll('.dwg-takeoff-tab')]
         .find((b) => b.textContent === 'Layers')?.click();`;
   }
+  if (action?.startsWith('quantities-unit=')) {
+    // The Layers tab of a drawing that declares no unit, after saying what its unit is
+    const code = JSON.stringify(action.slice('quantities-unit='.length));
+    return `
+      [...document.querySelectorAll('.dwg-toolbar button')]
+        .find((b) => b.textContent === 'Quantities')?.click();
+      [...document.querySelectorAll('.dwg-takeoff-tab')]
+        .find((b) => b.textContent === 'Layers')?.click();
+      const declare = document.querySelector('.dwg-takeoff-hint select');
+      if (declare) { declare.value = ${code}; declare.dispatchEvent(new Event('change')); }`;
+  }
   if (action === 'filter') {
     return `
       document.querySelector('.dwg-layer-button')?.click();

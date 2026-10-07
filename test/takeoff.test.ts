@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { measureSelection, takeOff } from '../src/webview/takeoff';
-import { DRAWING_UNITS, NO_VALUE, convertArea, convertLength, defaultUnit, formatArea, formatLength } from '../src/webview/units';
+import { DECLARABLE_UNITS, DRAWING_UNITS, NO_VALUE, convertArea, convertLength, defaultUnit, knownUnits, formatArea, formatLength } from '../src/webview/units';
 import { UTF8_BOM, csvField, toCsv, toTsv } from '../src/webview/table';
 import type { ObjectInfo } from '../src/shared/types';
 
@@ -127,6 +127,23 @@ test('areas scale by the square of the length factor', () => {
   // 144 in² is one square foot.
   assert.ok(Math.abs(convertArea(144, 1, defaultUnit(1)) - 1) < 1e-12);
   assert.equal(convertArea(42, 6, undefined), 42);
+});
+
+test('a drawing whose unit is unknown is never converted into a real unit', () => {
+  const metre = defaultUnit(6);
+  // Picking metres for a drawing that never said it was in metres would be a guess.
+  assert.ok(Number.isNaN(convertLength(42, undefined, metre)));
+  assert.ok(Number.isNaN(convertArea(42, 99, metre)));
+  assert.equal(formatLength(convertLength(42, undefined, metre), metre), NO_VALUE);
+  assert.equal(knownUnits(undefined), undefined);
+  assert.equal(knownUnits(99), undefined);
+  assert.equal(knownUnits(4), 4);
+});
+
+test('the units a user can declare for a drawing all convert', () => {
+  for (const { code } of DECLARABLE_UNITS) assert.equal(knownUnits(code), code);
+  // Declaring millimetres turns 6 000 × 4 000 into 24 m²
+  assert.equal(convertArea(6000 * 4000, DECLARABLE_UNITS.find((u) => u.label === 'mm')!.code, defaultUnit(4)), 24);
 });
 
 test('with no chosen unit the numbers stay as the file stores them', () => {
