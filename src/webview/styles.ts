@@ -20,6 +20,8 @@ export const WEBVIEW_STYLES = `
       --dwg-warning: var(--vscode-editorWarning-foreground, #cca700);
       --dwg-error: var(--vscode-errorForeground, #f48771);
       --dwg-canvas: #1e1e1e;
+      --dwg-highlight: #ffcc00;
+      --dwg-highlight-fill: rgba(255, 204, 0, 0.35);
     }
 
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--dwg-canvas); }
@@ -98,6 +100,51 @@ export const WEBVIEW_STYLES = `
     .dwg-layer-nomatch { padding: 8px 4px; color: var(--dwg-muted); font-size: 11px; text-align: center; }
 
     .dwg-export { display: flex; gap: 4px; }
+
+    .dwg-search { position: relative; }
+    .dwg-search-panel { width: 340px; }
+    .dwg-search-input-row { display: flex; align-items: center; gap: 6px; }
+    .dwg-search-input-row .dwg-layer-filter { flex: 1 1 auto; margin-bottom: 0; }
+    .dwg-search-counter { flex: 0 0 auto; color: var(--dwg-muted); font-size: 11px; }
+    .dwg-search-results { margin-top: 4px; }
+    .dwg-search-group {
+      padding: 6px 4px 2px; color: var(--dwg-muted); font-size: 10px;
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .dwg-search-row { cursor: pointer; }
+    .dwg-search-current { background: var(--vscode-list-activeSelectionBackground, #04395e); }
+
+    /* Selection: the drawing fades back and highlighted copies sit on top. */
+    .dwg-dimmed { opacity: 0.3; }
+    .dwg-highlight { pointer-events: none; }
+    .dwg-highlight * { stroke: var(--dwg-highlight) !important; }
+    .dwg-highlight text { fill: var(--dwg-highlight) !important; stroke: none !important; }
+    .dwg-highlight [fill]:not([fill="none"]):not(text) { fill: var(--dwg-highlight-fill) !important; }
+
+    .dwg-inspector {
+      position: absolute; top: 8px; right: 8px; z-index: 5; width: 280px; max-height: calc(100% - 16px);
+      overflow-y: auto; background: var(--dwg-surface); color: var(--dwg-text);
+      border: 1px solid var(--dwg-border); border-radius: 3px;
+      box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
+      font-family: var(--vscode-font-family, sans-serif); font-size: 12px;
+    }
+    .dwg-inspector-header {
+      display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+      border-bottom: 1px solid var(--dwg-divider);
+    }
+    .dwg-inspector-title { flex: 1 1 auto; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dwg-inspector-close { background: none; border: none; color: var(--dwg-muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
+    .dwg-inspector-close:hover { color: var(--dwg-text); }
+    .dwg-inspector-close:focus-visible { outline: 1px solid var(--dwg-focus); outline-offset: 1px; }
+    .dwg-inspector-section {
+      padding: 8px 8px 2px; color: var(--dwg-muted); font-size: 10px;
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .dwg-inspector-table { width: 100%; border-collapse: collapse; margin: 2px 0 6px; }
+    .dwg-inspector-table td { padding: 2px 8px; vertical-align: top; word-break: break-word; }
+    .dwg-inspector-label { color: var(--dwg-muted); width: 34%; white-space: nowrap; }
+    .dwg-inspector-table .dwg-layer-swatch { display: inline-block; margin-right: 6px; vertical-align: -1px; }
+    .dwg-inspector-hidden td { opacity: 0.6; font-style: italic; }
 
     .dwg-banner {
       display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto;

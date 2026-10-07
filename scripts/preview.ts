@@ -48,6 +48,48 @@ async function toDxfText(filePath: string): Promise<string> {
  * a filtered list — can be captured too.
  */
 function interactionScript(action: string | undefined): string {
+  if (action?.startsWith('search=')) {
+    // Ctrl+F, type the query, then Enter to the first result — or the n-th, with search=<query>#<n>
+    const [text, nth] = action.slice('search='.length).split('#');
+    const query = JSON.stringify(text);
+    return `
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true }));
+      const box = document.querySelector('.dwg-search-panel input');
+      box.value = ${query};
+      for (let i = 0; i < ${Number(nth) || 1}; i++) box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));`;
+  }
+  if (action?.startsWith('click=')) {
+    // click=<page>,<x>,<y>: open a page, then click the given drawing coordinates.
+    // The browser's own transform finds the pixel, so the check does not trust our maths.
+    const [page, x, y] = action.slice('click='.length).split(',').map(Number);
+    return `
+      const select = document.querySelector('.dwg-page-select');
+      if (select) { select.value = '${page}'; select.dispatchEvent(new Event('change')); }
+      setTimeout(() => {
+        const svg = document.querySelector('.dwg-canvas svg');
+        const flip = svg.querySelector('g');
+        const at = new DOMPoint(${x}, ${y}).matrixTransform(flip.getScreenCTM());
+        const init = { bubbles: true, clientX: at.x, clientY: at.y, button: 0 };
+        svg.dispatchEvent(new MouseEvent('mousemove', init));
+        svg.dispatchEvent(new MouseEvent('mousedown', init));
+        window.dispatchEvent(new MouseEvent('mouseup', init));
+        svg.dispatchEvent(new MouseEvent('click', init));
+      }, 300);`;
+  }
+  if (action?.startsWith('inspect=')) {
+    // A real click on the middle of the first text containing the given string
+    const needle = JSON.stringify(action.slice('inspect='.length));
+    return `
+      const target = [...document.querySelectorAll('.dwg-canvas svg text')].find((t) => t.textContent.includes(${needle}));
+      if (target) {
+        const r = target.getBoundingClientRect();
+        const init = { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0 };
+        const svg = document.querySelector('.dwg-canvas svg');
+        svg.dispatchEvent(new MouseEvent('mousedown', init));
+        window.dispatchEvent(new MouseEvent('mouseup', init));
+        svg.dispatchEvent(new MouseEvent('click', init));
+      }`;
+  }
   if (action === 'layers') {
     return `document.querySelector('.dwg-layer-button')?.click();`;
   }

@@ -442,6 +442,15 @@ View conversion logs: **View → Output → select "DWG Previewer"** in the drop
 
 ## 📝 Changelog
 
+### 2026-10-07 · unreleased · Find + object inspector
+- **Find (Ctrl+F)** across every page: text, attributes (hidden ones too), block names, layers and entity types, grouped by kind; Enter / Shift+Enter step through results, which switch page, zoom to the hit and highlight it
+- **Click to inspect**: clicking any line of a block selects the whole INSERT; a panel shows type, block, layer, handle, position, rotation, scale and attributes
+- Parser: `ParsedDxf.objects` (one per top-level entity) and `obj` on every drawn entity; ATTRIBs linked to their INSERT by handle
+- Picking is geometric (`src/webview/pick.ts`): Chromium does not hit-test `non-scaling-stroke` lines, so only text was clickable
+- **Fixed a long-standing bug**: client → drawing coordinates ignored the letterbox margins of the proportional SVG, so status-bar X/Y, wheel-zoom anchoring and panning speed were off whenever the window and drawing proportions differed
+- Preview harness actions: `--search=<query>[#n]`, `--inspect=<text>`, `--click=<page>,<x>,<y>` (drawing coordinates)
+- 128 → 157 unit tests
+
 ### 2026-10-07 · unreleased (branch `fix/review-findings`) · Code review round 2
 See details in [Code review & fix round 2](#-code-review--fix-round-2-2026-10-06--10-07-branch-fixreview-findings).
 - Fixed 14/14 Important issues from the full `master` review; license switched to GPL-3.0-or-later, libdxfrw removed

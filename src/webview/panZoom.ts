@@ -14,14 +14,36 @@ export function applyViewBox(svg: SVGSVGElement, vb: ViewBox): void {
   svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
 }
 
-/** Turns a client point into viewBox coordinates. */
-export function clientToViewBox(svg: SVGSVGElement, clientX: number, clientY: number): { x: number; y: number } {
+/**
+ * Screen pixels per viewBox unit, and where the viewBox's origin lands in the
+ * element. The SVG keeps the drawing's proportions (the default
+ * preserveAspectRatio, "xMidYMid meet"): the viewBox is scaled to fit and
+ * centred, leaving empty margins along one axis.
+ */
+function viewportMapping(svg: SVGSVGElement): { scale: number; left: number; top: number; vb: ViewBox } {
   const vb = getViewBox(svg);
   const rect = svg.getBoundingClientRect();
+  const scale = Math.min(rect.width / vb.w, rect.height / vb.h) || 1;
   return {
-    x: vb.x + ((clientX - rect.left) / rect.width) * vb.w,
-    y: vb.y + ((clientY - rect.top) / rect.height) * vb.h,
+    scale,
+    left: rect.left + (rect.width - vb.w * scale) / 2,
+    top: rect.top + (rect.height - vb.h * scale) / 2,
+    vb,
   };
+}
+
+/** Turns a client point into viewBox coordinates. */
+export function clientToViewBox(svg: SVGSVGElement, clientX: number, clientY: number): { x: number; y: number } {
+  const { scale, left, top, vb } = viewportMapping(svg);
+  return {
+    x: vb.x + (clientX - left) / scale,
+    y: vb.y + (clientY - top) / scale,
+  };
+}
+
+/** ViewBox units per screen pixel — how far a pixel reaches in the drawing. */
+export function unitsPerPixel(svg: SVGSVGElement): number {
+  return 1 / viewportMapping(svg).scale;
 }
 
 /** Scales the view about a fixed point, given in viewBox coordinates. */
@@ -72,9 +94,10 @@ export function attachPanZoom(
   const onMouseMove = (event: MouseEvent) => {
     if (!isPanning) return;
     const vb = getViewBox(svg);
-    const rect = svg.getBoundingClientRect();
-    const dx = ((event.clientX - lastX) / rect.width) * vb.w;
-    const dy = ((event.clientY - lastY) / rect.height) * vb.h;
+    // Both axes share one scale, so the drawing follows the cursor exactly
+    const perPixel = unitsPerPixel(svg);
+    const dx = (event.clientX - lastX) * perPixel;
+    const dy = (event.clientY - lastY) * perPixel;
     applyViewBox(svg, { ...vb, x: vb.x - dx, y: vb.y - dy });
     lastX = event.clientX;
     lastY = event.clientY;

@@ -37,11 +37,13 @@ import { EntityExtras, Vector3D, scanEntityExtras } from './extras';
 import { scanHatches } from './hatch';
 import { RawViewport, scanViewports, viewportTransform } from './viewport';
 import { sampleSpline } from './spline';
+import { computeBounds } from '../shared/bounds';
 import {
   Bounds,
   DxfEntity,
   DxfPage,
   LayerInfo,
+  ObjectInfo,
   ParsedDxf,
   Point2D,
   TextEntity,
@@ -102,6 +104,11 @@ interface ParseContext {
    * counting, so model geometry outside the window never uses up the budget.
    */
   keep: ((entity: DxfEntity) => boolean) | null;
+  /** Top-level objects, and the one whose geometry is being collected right now. */
+  objects: ObjectInfo[];
+  currentObj: number | null;
+  /** Objects that produced at least one drawn entity. */
+  drawnObjects: Set<number>;
   /** Entities produced so far, checked against maxEntities. */
   emitted: number;
   limitReached: boolean;
@@ -330,6 +337,11 @@ function resolveDxfFont(fontFile: string | null): string {
 interface RawAttrib {
   layer: string;
   style?: string;
+  /** Handle of the INSERT the attribute belongs to. */
+  insertHandle?: string;
+  tag: string;
+  /** Invisible attribute (flag bit 1): listed in the inspector, never drawn. */
+  hidden: boolean;
   position: Point2D;
   text: string;
   height: number;
@@ -354,6 +366,7 @@ function scanAttribs(text: string): RawAttrib[] {
   let section: string | null = null;
   let inPaperSpace = false;
   let insertLayer = '0';
+  let insertHandle: string | undefined;
 
   for (let i = 0; i + 1 < lines.length; i += 2) {
     const code = lines[i].trim();
@@ -368,15 +381,17 @@ function scanAttribs(text: string): RawAttrib[] {
         // Track the INSERT's paper-space flag and layer for ATTRIB inheritance
         inPaperSpace = false;
         insertLayer = '0';
+        insertHandle = undefined;
         for (let j = i + 2; j + 1 < lines.length && lines[j].trim() !== '0'; j += 2) {
           const c = lines[j].trim();
           const v = lines[j + 1].trim();
           if (c === '67' && v === '1') inPaperSpace = true;
           if (c === '8') insertLayer = v;
+          if (c === '5') insertHandle = v;
         }
       } else if (value === 'ATTRIB' && section === 'ENTITIES') {
         const attrib = parseAttrib(lines, i + 2, inPaperSpace, insertLayer);
-        if (attrib) attribs.push(attrib);
+        if (attrib) attribs.push({ ...attrib, insertHandle });
       }
     }
   }
@@ -393,6 +408,7 @@ function parseAttrib(lines: string[], from: number, inPaperSpace: boolean, inser
   let halign = 0;
   let valign = 0;
   let flags = 0;
+  let tag = '';
   let style: string | undefined;
   let ax: number | undefined, ay: number | undefined;
 
@@ -414,11 +430,10 @@ function parseAttrib(lines: string[], from: number, inPaperSpace: boolean, inser
       case '74': valign = Number(value) || 0; break;
       case '70': flags = Number(value) || 0; break;
       case '7': style = value; break;
+      case '2': tag = value; break;
     }
   }
 
-  // Flag bit 1: an invisible attribute, kept in the file but never drawn.
-  if (!textValue || flags & 1) return null;
 
   // Layer 0 ATTRIBs inherit the layer of their parent INSERT, just like
   // block content on layer 0 inherits from the INSERT that places it.
@@ -430,6 +445,9 @@ function parseAttrib(lines: string[], from: number, inPaperSpace: boolean, inser
   return {
     layer,
     style,
+    tag,
+    // Flag bit 1: an invisible attribute, kept in the file but never drawn.
+    hidden: (flags & 1) !== 0,
     position,
     text: decodeTextValue(textValue),
     height,
@@ -481,6 +499,9 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
     trustLayerOffFlags: options.trustLayerOffFlags ?? true,
     maxEntities: options.maxEntities ?? MAX_ENTITIES,
     keep: null,
+    objects: [],
+    currentObj: null,
+    drawnObjects: new Set(),
     emitted: 0,
     limitReached: false,
   };
@@ -488,15 +509,41 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   const modelEntities: DxfEntity[] = [];
   const paperEntities: DxfEntity[] = [];
 
+  /** Where each object lives until page indices are known: 'model', 'paper' or a layout block. */
+  const objectPlace: string[] = [];
+  const objectOf = new Map<IEntity, number>();
+  const register = (raw: IEntity, place: string): number => {
+    const index = context.objects.push(describeObject(raw)) - 1;
+    objectPlace.push(place);
+    objectOf.set(raw, index);
+    return index;
+  };
+
   for (const raw of dxf?.entities ?? []) {
     const target = raw.inPaperSpace ? paperEntities : modelEntities;
+    context.currentObj = register(raw, raw.inPaperSpace ? 'paper' : 'model');
     collectEntity(raw, context, IDENTITY, null, 0, target);
   }
+  context.currentObj = null;
+
+  const objectByHandle = new Map<string, number>();
+  context.objects.forEach((object, index) => {
+    if (object.handle !== undefined) objectByHandle.set(object.handle, index);
+  });
 
   // ATTRIBs are text labels attached to INSERTs. dxf-parser has no ATTRIB
   // handler, so they are scanned from the raw file and added as text entities.
-  // Their positions are already in world coordinates.
+  // Their positions are already in world coordinates. Each one is also listed
+  // on its INSERT, and drawn as part of it, so clicking a tag selects the door.
   for (const attrib of scanAttribs(text)) {
+    const owner = attrib.insertHandle !== undefined ? objectByHandle.get(attrib.insertHandle) : undefined;
+    if (owner !== undefined) {
+      const attributes = (context.objects[owner].attributes ??= []);
+      attributes.push(attrib.hidden ? { tag: attrib.tag, value: attrib.text, hidden: true } : { tag: attrib.tag, value: attrib.text });
+    }
+    // Hidden or blank attributes are part of the block's data, not its drawing
+    if (attrib.hidden || !attrib.text) continue;
+
     const color = layerColor(attrib.layer, context) ?? FALLBACK_COLOR;
     const entity: TextEntity = {
       type: 'TEXT',
@@ -511,6 +558,10 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
     };
     const font = attrib.style ? context.textStyles[attrib.style.toUpperCase()] : undefined;
     if (font) entity.fontFamily = font;
+    if (owner !== undefined) {
+      entity.obj = owner;
+      context.drawnObjects.add(owner);
+    }
     const target = attrib.inPaperSpace ? paperEntities : modelEntities;
     target.push(entity);
   }
@@ -527,13 +578,15 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
 
   /** Paper sheets additionally frame part of the model through their viewports. */
   const buildSheet = (name: string, entities: DxfEntity[], layoutBlock: string | null): DxfPage => {
-    const views = buildViewports(viewports, layoutBlock, rawModelEntities, context);
+    const views = buildViewports(viewports, layoutBlock, rawModelEntities, context, objectOf);
     const page = buildPage(name, entities);
     return views.length > 0 ? { ...page, viewports: views } : page;
   };
 
+  const pageOfPlace = new Map<string, number>([['model', 0]]);
   const pages: DxfPage[] = [buildPage('Model Space', modelEntities)];
   if (paperEntities.length > 0) {
+    pageOfPlace.set('paper', pages.length);
     pages.push(buildSheet('Paper Space', paperEntities, null));
   }
   const alreadyDrawn = new Set(
@@ -541,11 +594,27 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   );
   for (const [name, blockName, entities] of extraLayouts(context, alreadyDrawn)) {
     const collected: DxfEntity[] = [];
-    for (const raw of entities) collectEntity(raw, context, IDENTITY, null, 0, collected);
-    if (collected.length > 0) pages.push(buildSheet(name, collected, blockName));
+    for (const raw of entities) {
+      context.currentObj = register(raw, `layout:${blockName}`);
+      collectEntity(raw, context, IDENTITY, null, 0, collected);
+    }
+    context.currentObj = null;
+    if (collected.length > 0) {
+      pageOfPlace.set(`layout:${blockName}`, pages.length);
+      pages.push(buildSheet(name, collected, blockName));
+    }
   }
 
-  const result: ParsedDxf = { pages, skippedEntityTypes: Array.from(context.skippedEntityTypes) };
+  context.objects.forEach((object, index) => {
+    object.page = pageOfPlace.get(objectPlace[index]) ?? 0;
+    if (!context.drawnObjects.has(index)) object.empty = true;
+  });
+
+  const result: ParsedDxf = {
+    pages,
+    objects: context.objects,
+    skippedEntityTypes: Array.from(context.skippedEntityTypes),
+  };
   if (context.limitReached) {
     result.warnings = [
       `Drawing cut short: it expands to more than ${context.maxEntities.toLocaleString('en-US')} objects (the limit), ` +
@@ -553,6 +622,41 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
     ];
   }
   return result;
+}
+
+/** What the search and the inspector show for one top-level entity. */
+function describeObject(raw: IEntity): ObjectInfo {
+  const info: ObjectInfo = { type: raw.type, layer: raw.layer ?? '0', page: 0 };
+  if (raw.handle !== undefined) info.handle = String(raw.handle);
+
+  switch (raw.type) {
+    case 'INSERT': {
+      const e = raw as IInsertEntity;
+      info.block = e.name;
+      if (e.position) info.position = { x: e.position.x, y: e.position.y };
+      info.rotation = e.rotation ?? 0;
+      info.scale = { x: e.xScale ?? 1, y: e.yScale ?? 1 };
+      break;
+    }
+    case 'TEXT': {
+      const e = raw as ITextEntity;
+      if (e.text) info.text = decodeTextValue(e.text);
+      if (e.startPoint) info.position = { x: e.startPoint.x, y: e.startPoint.y };
+      break;
+    }
+    case 'MTEXT': {
+      const e = raw as IMtextEntity;
+      if (e.text) info.text = cleanMtext(e.text);
+      if (e.position) info.position = { x: e.position.x, y: e.position.y };
+      break;
+    }
+    case 'DIMENSION': {
+      const e = raw as IDimensionEntity;
+      info.text = formatDimensionText(e);
+      break;
+    }
+  }
+  return info;
 }
 
 /**
@@ -568,7 +672,8 @@ function buildViewports(
   viewports: RawViewport[],
   layoutBlock: string | null,
   rawModelEntities: IEntity[],
-  context: ParseContext
+  context: ParseContext,
+  objectOf: Map<IEntity, number>
 ): ViewportView[] {
   const views: ViewportView[] = [];
 
@@ -598,10 +703,13 @@ function buildViewports(
     context.keep = (e) => !frozenLayers.has(e.layer) && overlaps(computeBounds([e]), rect);
     try {
       for (const raw of rawModelEntities) {
+        // Geometry seen through a viewport still belongs to its model object
+        context.currentObj = objectOf.get(raw) ?? null;
         collectEntity(raw, context, transform, null, 0, visible);
       }
     } finally {
       context.keep = null;
+      context.currentObj = null;
     }
     if (visible.length === 0) continue;
 
@@ -830,6 +938,10 @@ function collectEntity(
     }
     if (linetype) entity.linetype = linetype;
     if (lineweight !== undefined) entity.lineweight = lineweight;
+    if (context.currentObj !== null) {
+      entity.obj = context.currentObj;
+      context.drawnObjects.add(context.currentObj);
+    }
     out.push(entity);
     context.emitted++;
   }
@@ -1598,98 +1710,3 @@ function formatNumber(value: number | undefined): string {
   return String(Math.round(value * 100) / 100);
 }
 
-/** Rough advance width of a glyph relative to the font size, for sans-serif text. */
-const GLYPH_WIDTH_RATIO = 0.6;
-/** Distance between MTEXT baselines in text heights; matches the renderer. */
-const LINE_SPACING = 5 / 3;
-/** Descenders reach this far below the baseline, in text heights. */
-const DESCENT = 0.25;
-
-/**
- * Corners of the box a text entity occupies, in drawing coordinates.
- *
- * The width is estimated from the character count, which is approximate but
- * far closer than treating text as a zero-size point. The box follows the
- * alignment the renderer uses: right-aligned text runs back from its anchor,
- * and extra MTEXT lines run downward. Viewports cull on this box, so getting
- * the side wrong drops text that reaches into the window.
- */
-function textBoxCorners(e: TextEntity): Point2D[] {
-  const lines = e.text.split('\n');
-  const longest = lines.reduce((max, line) => Math.max(max, line.length), 0);
-  const width = longest * e.height * GLYPH_WIDTH_RATIO;
-  const block = e.height * (1 + (lines.length - 1) * LINE_SPACING);
-
-  const left = e.hAlign === 'right' ? -width : e.hAlign === 'center' ? -width / 2 : 0;
-  let bottom: number;
-  switch (e.vAlign) {
-    case 'top': bottom = -block; break;
-    case 'middle': bottom = -block / 2; break;
-    case 'bottom': bottom = 0; break;
-    default: bottom = -(block - e.height) - e.height * DESCENT; // baseline of the first line
-  }
-  const top = e.vAlign === undefined || e.vAlign === 'baseline' ? e.height : bottom + block;
-
-  const radians = (e.rotation * Math.PI) / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-
-  return [
-    { x: left, y: bottom },
-    { x: left + width, y: bottom },
-    { x: left + width, y: top },
-    { x: left, y: top },
-  ].map((corner) => ({
-    x: e.position.x + corner.x * cos - corner.y * sin,
-    y: e.position.y + corner.x * sin + corner.y * cos,
-  }));
-}
-
-function computeBounds(entities: DxfEntity[]): Bounds | null {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-
-  const consider = (x: number, y: number) => {
-    if (!isFinite(x) || !isFinite(y)) return;
-    if (x < minX) minX = x;
-    if (y < minY) minY = y;
-    if (x > maxX) maxX = x;
-    if (y > maxY) maxY = y;
-  };
-
-  for (const e of entities) {
-    switch (e.type) {
-      case 'LINE':
-        consider(e.start.x, e.start.y);
-        consider(e.end.x, e.end.y);
-        break;
-      case 'CIRCLE':
-      case 'ARC':
-        consider(e.center.x - e.radius, e.center.y - e.radius);
-        consider(e.center.x + e.radius, e.center.y + e.radius);
-        break;
-      case 'POLYLINE':
-        for (const p of e.points) consider(p.x, p.y);
-        break;
-      case 'HATCH':
-        for (const loop of e.loops) for (const p of loop) consider(p.x, p.y);
-        break;
-      case 'POINT':
-        consider(e.position.x, e.position.y);
-        break;
-      case 'TEXT':
-        for (const corner of textBoxCorners(e)) consider(corner.x, corner.y);
-        break;
-      case 'DIMENSION':
-        consider(e.textPosition.x, e.textPosition.y);
-        if (e.linePoint1) consider(e.linePoint1.x, e.linePoint1.y);
-        if (e.linePoint2) consider(e.linePoint2.x, e.linePoint2.y);
-        break;
-    }
-  }
-
-  if (!isFinite(minX)) return null;
-  return { minX, minY, maxX, maxY };
-}
