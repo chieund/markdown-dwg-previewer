@@ -9,6 +9,8 @@ export it as an image.
 
 Works fully offline on Windows, macOS and Linux. Your drawings never leave your machine.
 
+![A multi-sheet architectural drawing open in VS Code: the floor plan seen through its viewport, with the title block and legend around it](assets/marketplace-sheet.png)
+
 ---
 
 ## Why people install it
@@ -29,6 +31,12 @@ next to the code that parses them.
 ---
 
 ## What you get
+
+![The Quantities panel: every layer with its colour, object count, length, area and hatch area, converted to feet, with a bold total](assets/marketplace-quantities.png)
+
+![All 57 doors of a floor plan highlighted after picking the DOOR row in Quantities](assets/marketplace-locate.png)
+
+![Find (Ctrl+F) zoomed onto the LOBBY label, with the inspector showing its layer, handle and position](assets/marketplace-find.png)
 
 - **Instant preview** — double-click a `.dwg` or `.dxf` file, that's the whole workflow
 - **DXF opens with no conversion at all** — DXF is the format this extension reads natively,

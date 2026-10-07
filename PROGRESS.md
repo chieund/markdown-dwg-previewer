@@ -382,7 +382,7 @@ The public page comes from `MARKETPLACE.md` (via `--readme-path`); `README.md` i
 |------|-----------|
 | `publisher` in `package.json` is currently `"bumkom"` | ⚠️ must exactly match the Publisher ID on the Marketplace account, otherwise it's rejected |
 | License | ✅ 2026-10-07: switched to **GPL-3.0-or-later**, added `LICENSE` + `THIRD_PARTY_NOTICES.md`, removed libdxfrw. ⚠️ Must **make the GitHub repo public** before publishing (GPL requires recipients to be able to obtain the source) |
-| No screenshots on the Marketplace page yet | ⚠️ for an image-viewing extension, this has the strongest impact on install rate |
+| Screenshots on the Marketplace page | ✅ 2026-10-08: 4 shots of the Autodesk AEC sample in `assets/marketplace-*.png` (sheet, Quantities, located doors, Find), regenerated with `npm run preview` |
 
 ---
 
