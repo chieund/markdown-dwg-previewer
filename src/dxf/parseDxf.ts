@@ -33,6 +33,7 @@ import {
 } from './matrix';
 import AUTO_CAD_COLOR_INDEX from 'dxf-parser/dist/AutoCadColorIndex';
 import { expandBulges } from './bulge';
+import { EntityExtras, Vector3D, scanEntityExtras } from './extras';
 import { scanHatches } from './hatch';
 import { RawViewport, scanViewports, viewportTransform } from './viewport';
 import { sampleSpline } from './spline';
@@ -63,6 +64,14 @@ const MAX_BLOCK_DEPTH = 16;
 const CIRCLE_SAMPLE_SEGMENTS = 64;
 
 /**
+ * Most entities one parse may produce. INSERT arrays multiply (rows × columns,
+ * nested), so a 200-byte file can otherwise ask for a billion entities and take
+ * the whole extension host down with it. The largest real drawing in the corpus
+ * has under 40k.
+ */
+export const MAX_ENTITIES = 500_000;
+
+/**
  * Fallback label height for DIMENSION, in drawing units.
  *
  * The real height lives in the DIMSTYLE table, which dxf-parser does not
@@ -84,6 +93,18 @@ interface ParseContext {
   layerHandleMap: Record<string, string>;
   /** Text style name → CSS font-family, resolved from STYLE table font filenames. */
   textStyles: Record<string, string>;
+  /** Extrusion, text style and file position per entity handle. */
+  extras: EntityExtras;
+  trustLayerOffFlags: boolean;
+  maxEntities: number;
+  /**
+   * While collecting for a viewport: which entities it can show. Applied before
+   * counting, so model geometry outside the window never uses up the budget.
+   */
+  keep: ((entity: DxfEntity) => boolean) | null;
+  /** Entities produced so far, checked against maxEntities. */
+  emitted: number;
+  limitReached: boolean;
 }
 
 /**
@@ -308,6 +329,7 @@ function resolveDxfFont(fontFile: string | null): string {
 
 interface RawAttrib {
   layer: string;
+  style?: string;
   position: Point2D;
   text: string;
   height: number;
@@ -370,6 +392,8 @@ function parseAttrib(lines: string[], from: number, inPaperSpace: boolean, inser
   let rotation = 0;
   let halign = 0;
   let valign = 0;
+  let flags = 0;
+  let style: string | undefined;
   let ax: number | undefined, ay: number | undefined;
 
   for (let i = from; i + 1 < lines.length; i += 2) {
@@ -388,30 +412,31 @@ function parseAttrib(lines: string[], from: number, inPaperSpace: boolean, inser
       case '50': rotation = Number(value) || 0; break;
       case '72': halign = Number(value) || 0; break;
       case '74': valign = Number(value) || 0; break;
+      case '70': flags = Number(value) || 0; break;
+      case '7': style = value; break;
     }
   }
 
-  if (!textValue) return null;
+  // Flag bit 1: an invisible attribute, kept in the file but never drawn.
+  if (!textValue || flags & 1) return null;
 
   // Layer 0 ATTRIBs inherit the layer of their parent INSERT, just like
   // block content on layer 0 inherits from the INSERT that places it.
   if (layer === '0' && insertLayer !== '0') layer = insertLayer;
 
-  // When alignment is set, use the alignment point (11/21)
-  const hasAlignment = halign > 0 || valign > 0;
-  const position = hasAlignment && ax !== undefined && ay !== undefined
-    ? { x: ax, y: ay }
-    : { x, y };
+  const position =
+    usesAlignmentPoint(halign, valign) && ax !== undefined && ay !== undefined ? { x: ax, y: ay } : { x, y };
 
   return {
     layer,
+    style,
     position,
-    text: decodeControlCodes(textValue),
+    text: decodeTextValue(textValue),
     height,
     rotation,
     inPaperSpace,
     hAlign: textHAlign(halign),
-    vAlign: textVAlign(valign),
+    vAlign: textVAlign(valign, halign),
   };
 }
 
@@ -428,9 +453,21 @@ function extractLineTypes(dxf: ReturnType<DxfParser['parseSync']>): Record<strin
   return result;
 }
 
-export function parseDxf(text: string): ParsedDxf {
+export interface ParseOptions {
+  /**
+   * Honour layer on/off (a negative layer colour). Off for DWGs converted by
+   * libredwg, which writes every layer's colour negative — trusting it would
+   * open every drawing with all layers hidden.
+   */
+  trustLayerOffFlags?: boolean;
+  /** Overrides MAX_ENTITIES. */
+  maxEntities?: number;
+}
+
+export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   const dxf = parseWithRecovery(text);
-  injectHatches(text, dxf);
+  const extras = scanEntityExtras(text);
+  injectHatches(text, dxf, extras);
 
   const context: ParseContext = {
     layers: dxf?.tables?.layer?.layers ?? {},
@@ -440,6 +477,12 @@ export function parseDxf(text: string): ParsedDxf {
     layerLineTypes: scanLayerLineTypes(text),
     layerHandleMap: scanLayerHandles(text),
     textStyles: scanTextStyles(text),
+    extras,
+    trustLayerOffFlags: options.trustLayerOffFlags ?? true,
+    maxEntities: options.maxEntities ?? MAX_ENTITIES,
+    keep: null,
+    emitted: 0,
+    limitReached: false,
   };
 
   const modelEntities: DxfEntity[] = [];
@@ -455,7 +498,7 @@ export function parseDxf(text: string): ParsedDxf {
   // Their positions are already in world coordinates.
   for (const attrib of scanAttribs(text)) {
     const color = layerColor(attrib.layer, context) ?? FALLBACK_COLOR;
-    const entity: DxfEntity = {
+    const entity: TextEntity = {
       type: 'TEXT',
       layer: attrib.layer,
       color,
@@ -466,6 +509,8 @@ export function parseDxf(text: string): ParsedDxf {
       hAlign: attrib.hAlign,
       vAlign: attrib.vAlign,
     };
+    const font = attrib.style ? context.textStyles[attrib.style.toUpperCase()] : undefined;
+    if (font) entity.fontFamily = font;
     const target = attrib.inPaperSpace ? paperEntities : modelEntities;
     target.push(entity);
   }
@@ -500,7 +545,14 @@ export function parseDxf(text: string): ParsedDxf {
     if (collected.length > 0) pages.push(buildSheet(name, collected, blockName));
   }
 
-  return { pages, skippedEntityTypes: Array.from(context.skippedEntityTypes) };
+  const result: ParsedDxf = { pages, skippedEntityTypes: Array.from(context.skippedEntityTypes) };
+  if (context.limitReached) {
+    result.warnings = [
+      `Drawing cut short: it expands to more than ${context.maxEntities.toLocaleString('en-US')} objects (the limit), ` +
+        'usually because of a huge block array.',
+    ];
+  }
+  return result;
 }
 
 /**
@@ -530,30 +582,43 @@ function buildViewports(
         .filter((name): name is string => !!name)
     );
 
-    const transform = viewportTransform(viewport);
-    const entities: DxfEntity[] = [];
-    for (const raw of rawModelEntities) {
-      collectEntity(raw, context, transform, null, 0, entities);
-    }
+    const rect = {
+      x: viewport.paper.x - viewport.paper.width / 2,
+      y: viewport.paper.y - viewport.paper.height / 2,
+      width: viewport.paper.width,
+      height: viewport.paper.height,
+    };
 
-    // Remove entities on layers frozen in this viewport
-    const visible = frozenLayers.size > 0
-      ? entities.filter((e) => !frozenLayers.has(e.layer))
-      : entities;
+    // Keep what this viewport can actually show: not on a layer frozen in it,
+    // and touching its window. Each viewport re-collects the whole model, so
+    // without the window test a sheet of detail views carries the full model
+    // once per viewport.
+    const transform = viewportTransform(viewport);
+    const visible: DxfEntity[] = [];
+    context.keep = (e) => !frozenLayers.has(e.layer) && overlaps(computeBounds([e]), rect);
+    try {
+      for (const raw of rawModelEntities) {
+        collectEntity(raw, context, transform, null, 0, visible);
+      }
+    } finally {
+      context.keep = null;
+    }
     if (visible.length === 0) continue;
 
-    views.push({
-      rect: {
-        x: viewport.paper.x - viewport.paper.width / 2,
-        y: viewport.paper.y - viewport.paper.height / 2,
-        width: viewport.paper.width,
-        height: viewport.paper.height,
-      },
-      entities: visible,
-    });
+    views.push({ rect, entities: visible });
   }
 
   return views;
+}
+
+function overlaps(bounds: Bounds | null, rect: { x: number; y: number; width: number; height: number }): boolean {
+  if (!bounds) return false;
+  return (
+    bounds.maxX >= rect.x &&
+    bounds.minX <= rect.x + rect.width &&
+    bounds.maxY >= rect.y &&
+    bounds.minY <= rect.y + rect.height
+  );
 }
 
 /**
@@ -611,11 +676,12 @@ function collectLayers(entities: DxfEntity[], context: ParseContext): LayerInfo[
     counts.set(entity.layer, (counts.get(entity.layer) ?? 0) + 1);
   }
 
-  return Array.from(counts, ([name, entityCount]) => ({
-    name,
-    color: layerColor(name, context) ?? FALLBACK_COLOR,
-    entityCount,
-  })).sort((a, b) => a.name.localeCompare(b.name));
+  return Array.from(counts, ([name, entityCount]): LayerInfo => {
+    const info: LayerInfo = { name, color: layerColor(name, context) ?? FALLBACK_COLOR, entityCount };
+    // A negative colour in the layer table means the layer is switched off.
+    if (context.trustLayerOffFlags && context.layers[name]?.visible === false) info.off = true;
+    return info;
+  }).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -627,12 +693,19 @@ function collectLayers(entities: DxfEntity[], context: ParseContext): LayerInfo[
  * inheritance, colour resolution and transforms all apply as they would to any
  * other entity, rather than needing a parallel path.
  */
-function injectHatches(text: string, dxf: ReturnType<DxfParser['parseSync']>): void {
+function injectHatches(
+  text: string,
+  dxf: ReturnType<DxfParser['parseSync']>,
+  extras: EntityExtras
+): void {
   if (!dxf) return;
 
+  const pending = new Map<IEntity[], IEntity[]>();
   for (const hatch of scanHatches(text)) {
     const pseudoEntity = {
       type: 'HATCH',
+      handle: hatch.handle,
+      extrusionDirection: hatch.extrusion,
       layer: hatch.layer,
       colorIndex: hatch.colorIndex,
       color: hatch.colorIndex !== undefined ? aciToTrueColor(hatch.colorIndex) : undefined,
@@ -643,9 +716,41 @@ function injectHatches(text: string, dxf: ReturnType<DxfParser['parseSync']>): v
       patternScale: hatch.patternScale,
     } as unknown as IEntity;
 
-    if (hatch.blockName) dxf.blocks?.[hatch.blockName]?.entities?.push(pseudoEntity);
-    else dxf.entities?.push(pseudoEntity);
+    const list = hatch.blockName ? dxf.blocks?.[hatch.blockName]?.entities : dxf.entities;
+    if (!list) continue;
+    if (!pending.has(list)) pending.set(list, []);
+    pending.get(list)!.push(pseudoEntity);
   }
+
+  for (const [list, hatches] of pending) mergeInFileOrder(list, hatches, extras);
+}
+
+/**
+ * Puts hatches back where the file had them. Draw order matters for fills: a
+ * solid hatch appended at the end would paint over the text and linework the
+ * file drew on top of it. Both lists are already in file order, so one merge
+ * pass places them all. Without handles there is no order to go by, and the
+ * hatches are appended.
+ */
+function mergeInFileOrder(list: IEntity[], hatches: IEntity[], extras: EntityExtras): void {
+  const position = (entity: IEntity) =>
+    entity.handle !== undefined ? extras.ordinal.get(String(entity.handle)) : undefined;
+
+  const merged: IEntity[] = [];
+  let next = 0;
+  for (const entity of list) {
+    const at = position(entity);
+    if (at !== undefined) {
+      while (next < hatches.length && (position(hatches[next]) ?? Infinity) < at) {
+        merged.push(hatches[next++]);
+      }
+    }
+    merged.push(entity);
+  }
+  while (next < hatches.length) merged.push(hatches[next++]);
+
+  list.length = 0;
+  for (const entity of merged) list.push(entity);
 }
 
 function aciToTrueColor(index: number): number | undefined {
@@ -699,8 +804,12 @@ function collectEntity(
   depth: number,
   out: DxfEntity[]
 ): void {
+  if (context.limitReached) return;
+  // Group 60 = 1 marks an entity invisible; CAD software does not draw it.
+  if ((raw as IEntity & { visible?: boolean }).visible === false) return;
+
   const layer = resolveLayer(raw, host);
-  const color = resolveColor(raw, context, host?.color ?? null);
+  const color = resolveColor(raw, layer, context, host?.color ?? null);
 
   if (raw.type === 'INSERT') {
     expandInsert(raw as IInsertEntity, context, transform, { layer, color }, depth, out);
@@ -714,9 +823,15 @@ function collectEntity(
   // recognised type yielding nothing (an empty TEXT, say) is not a gap.
   const entities = mapEntity(raw, layer, color, transform, context);
   for (const entity of entities) {
+    if (context.keep && !context.keep(entity)) continue;
+    if (context.emitted >= context.maxEntities) {
+      context.limitReached = true;
+      return;
+    }
     if (linetype) entity.linetype = linetype;
     if (lineweight !== undefined) entity.lineweight = lineweight;
     out.push(entity);
+    context.emitted++;
   }
 }
 
@@ -789,17 +904,49 @@ function expandInsert(
       for (const child of block.entities) {
         collectEntity(child, context, combined, host, depth + 1, out);
       }
+      if (context.limitReached) return;
     }
   }
+}
+
+/**
+ * Entity types whose coordinates are written in their own OCS rather than world
+ * coordinates. AutoCAD's MIRROR command commonly flips the extrusion to
+ * (0,0,-1) instead of rewriting the points, so ignoring it draws the mirrored
+ * half of a part on top of the original.
+ */
+const OCS_TYPES = new Set(['ARC', 'CIRCLE', 'LWPOLYLINE', 'POLYLINE', 'SOLID', 'TEXT', 'HATCH']);
+
+function entityExtrusion(raw: IEntity, context: ParseContext): Vector3D | undefined {
+  const e = raw as IEntity & {
+    extrusionDirection?: Vector3D;
+    extrusionDirectionX?: number;
+    extrusionDirectionY?: number;
+    extrusionDirectionZ?: number;
+    is3dPolyline?: boolean;
+    is3dPolygonMesh?: boolean;
+    isPolyfaceMesh?: boolean;
+  };
+  // 3D polylines and meshes hold world coordinates
+  if (e.is3dPolyline || e.is3dPolygonMesh || e.isPolyfaceMesh) return undefined;
+  if (e.extrusionDirection) return e.extrusionDirection;
+  if (e.extrusionDirectionZ !== undefined) {
+    return { x: e.extrusionDirectionX ?? 0, y: e.extrusionDirectionY ?? 0, z: e.extrusionDirectionZ };
+  }
+  return e.handle !== undefined ? context.extras.extrusion.get(String(e.handle)) : undefined;
 }
 
 function mapEntity(
   raw: IEntity,
   layer: string,
   color: string,
-  m: Matrix2D,
+  transform: Matrix2D,
   context: ParseContext
 ): DxfEntity[] {
+  const m = OCS_TYPES.has(raw.type)
+    ? multiply(transform, extrusionMatrix(entityExtrusion(raw, context)))
+    : transform;
+
   switch (raw.type) {
     case 'LINE': {
       const e = raw as ILineEntity;
@@ -942,8 +1089,8 @@ function mapEntity(
           color,
           loops,
           solid: !!e.solid,
-          // The transform can rotate and resize the hatch along with its boundary.
-          patternAngle: (e.patternAngle ?? 0) + (rotationAngle(m) * 180) / Math.PI,
+          // The transform can rotate, mirror and resize the hatch along with its boundary.
+          patternAngle: directionAngle(m, e.patternAngle ?? 0),
           patternSpacing: hatchSpacing(e.patternScale, m),
         },
       ];
@@ -992,13 +1139,11 @@ function mapEntity(
     case 'TEXT': {
       const e = raw as ITextEntity;
       if (!e.startPoint || !e.text) return [];
-      const text = decodeControlCodes(e.text);
+      const text = decodeTextValue(e.text);
       if (!text) return [];
-      // When alignment is set (halign > 0 or valign > 0), DXF uses endPoint as the alignment point.
-      const hasAlignment = (e.halign && e.halign > 0) || (e.valign && e.valign > 0);
-      const anchor = hasAlignment && e.endPoint ? e.endPoint : e.startPoint;
+      const anchor = usesAlignmentPoint(e.halign, e.valign) && e.endPoint ? e.endPoint : e.startPoint;
       const hAlign = textHAlign(e.halign);
-      const vAlign = textVAlign(e.valign);
+      const vAlign = textVAlign(e.valign, e.halign);
       const font = resolveTextFont(raw, context);
       return [buildText(layer, color, anchor, text, e.textHeight || 1, e.rotation || 0, m, hAlign, vAlign, font)];
     }
@@ -1034,6 +1179,18 @@ function mapEntity(
   }
 }
 
+/**
+ * Whether TEXT is placed by its second point (11/21) rather than the first.
+ *
+ * Any alignment other than plain left/baseline uses the second point, except
+ * Aligned (3) and Fit (5): those stretch the text between both points, so the
+ * first point is still where the text starts.
+ */
+function usesAlignmentPoint(halign: number | undefined, valign: number | undefined): boolean {
+  if (halign === 3 || halign === 5) return false;
+  return (halign ?? 0) > 0 || (valign ?? 0) > 0;
+}
+
 /** DXF TEXT entity horizontal alignment (group code 72). */
 function textHAlign(halign: number | undefined): 'left' | 'center' | 'right' {
   switch (halign) {
@@ -1044,8 +1201,9 @@ function textHAlign(halign: number | undefined): 'left' | 'center' | 'right' {
   }
 }
 
-/** DXF TEXT entity vertical alignment (group code 73). */
-function textVAlign(valign: number | undefined): 'baseline' | 'bottom' | 'middle' | 'top' {
+/** DXF TEXT entity vertical alignment (group code 73). Horizontal "Middle" (4) centres both ways. */
+function textVAlign(valign: number | undefined, halign?: number): 'baseline' | 'bottom' | 'middle' | 'top' {
+  if (halign === 4) return 'middle';
   switch (valign) {
     case 1: return 'bottom';
     case 2: return 'middle';
@@ -1082,6 +1240,14 @@ function buildText(
   fontFamily?: string
 ): DxfEntity {
   const scaleFactor = transformScale(m);
+  let rotation = directionAngle(m, rotationDeg);
+  // A mirror would draw the glyphs upside down or backwards. Turn the text the
+  // other way round and anchor it at its far end instead: it stays readable and
+  // still covers the stretch of the drawing AutoCAD gives it.
+  if (determinant(m) < 0) {
+    rotation += 180;
+    hAlign = hAlign === 'right' ? 'left' : hAlign === 'center' ? 'center' : 'right';
+  }
   const result: TextEntity = {
     type: 'TEXT',
     layer,
@@ -1089,7 +1255,7 @@ function buildText(
     position: applyToPoint(m, position),
     text,
     height: height * scaleFactor,
-    rotation: rotationDeg + (rotationAngle(m) * 180) / Math.PI,
+    rotation,
   };
   if (hAlign && hAlign !== 'left') result.hAlign = hAlign;
   if (vAlign && vAlign !== 'baseline') result.vAlign = vAlign;
@@ -1119,6 +1285,18 @@ function finitePoints(points: (Point2D | undefined)[]): Point2D[] {
  */
 function hatchSpacing(patternScale: number | undefined, m: Matrix2D): number {
   return Math.max(0.05, (patternScale || 1) * transformScale(m));
+}
+
+/**
+ * Where a direction at `degrees` points once `m` is applied, in degrees. Adding
+ * the transform's rotation is only right without a mirror, which turns
+ * directions the other way.
+ */
+function directionAngle(m: Matrix2D, degrees: number): number {
+  const radians = (degrees * Math.PI) / 180;
+  const x = m.a * Math.cos(radians) + m.c * Math.sin(radians);
+  const y = m.b * Math.cos(radians) + m.d * Math.sin(radians);
+  return (Math.atan2(y, x) * 180) / Math.PI;
 }
 
 /** How much a transform grows or shrinks lengths, for sizing text and patterns. */
@@ -1203,15 +1381,20 @@ function sampleArc(
   return points;
 }
 
-function resolveColor(raw: IEntity, context: ParseContext, blockColor: string | null): string {
+/**
+ * `layer` is the resolved layer — for layer-0 geometry inside a block that is
+ * the INSERT's layer, so BYLAYER colour follows it the same way the layer
+ * panel does.
+ */
+function resolveColor(raw: IEntity, layer: string, context: ParseContext, blockColor: string | null): string {
   const index = raw.colorIndex;
   // 0 = BYBLOCK (inherit from the INSERT that placed this entity),
   // 256 = BYLAYER, anything else is the entity's own color.
-  if (index === 0) return blockColor ?? layerColor(raw.layer, context) ?? FALLBACK_COLOR;
+  if (index === 0) return blockColor ?? layerColor(layer, context) ?? FALLBACK_COLOR;
   if (index !== undefined && index !== 256 && typeof raw.color === 'number') {
     return toHexColor(raw.color);
   }
-  return layerColor(raw.layer, context) ?? blockColor ?? FALLBACK_COLOR;
+  return layerColor(layer, context) ?? blockColor ?? FALLBACK_COLOR;
 }
 
 function layerColor(layer: string | undefined, context: ParseContext): string | null {
@@ -1266,16 +1449,15 @@ function resolveLineweight(raw: IEntity, layer: string, context: ParseContext): 
 }
 
 /**
- * Resolves the CSS font-family for a text entity.
- *
- * dxf-parser does not read group code 7 (text style name) from entities, so we
- * cannot look up the per-entity style. Instead, the STANDARD style's font is
- * used as default — this is correct for the majority of drawings that use a
- * single text style throughout.
+ * Resolves the CSS font-family for a text entity: its own style (group 7), or
+ * STANDARD when it names none.
  */
 function resolveTextFont(raw: IEntity, context: ParseContext): string | undefined {
-  // Try the entity's style name if somehow available (future-proofing)
-  const styleName = (raw as any).textStyle ?? (raw as any).styleName;
+  // dxf-parser drops group 7, so the style comes from the raw scan by handle.
+  const styleName =
+    (raw.handle !== undefined ? context.extras.style.get(String(raw.handle)) : undefined) ??
+    (raw as any).textStyle ??
+    (raw as any).styleName;
   if (styleName) {
     const font = context.textStyles[styleName.toUpperCase()];
     if (font) return font;
@@ -1288,14 +1470,102 @@ function toHexColor(truecolor: number): string {
   return `#${(truecolor & 0xffffff).toString(16).padStart(6, '0')}`;
 }
 
-/** Strips MTEXT formatting control codes down to plain text — good enough for a label, not a full rich-text renderer. */
+/**
+ * Reduces MTEXT rich text to plain text with line breaks — good enough for a
+ * label, not a full rich-text renderer.
+ *
+ * Codes come in three shapes and must be told apart, or a toggle like `\L`
+ * swallows everything up to the next semicolon in the sentence:
+ * - toggles with no argument: `\L \l \O \o \K \k`
+ * - codes whose argument runs to a semicolon: `\f \H \C \S` …
+ * - escapes standing for a character: `\P \N \~ \\ \{ \}` and `\U+XXXX`.
+ */
 function cleanMtext(raw: string): string {
-  return decodeControlCodes(
-    raw
-      .replace(/\\P/gi, '\n')
-      .replace(/\{|\}/g, '')
-      .replace(/\\[A-Za-z][^;]*;/g, '')
-  );
+  let out = '';
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === '{' || ch === '}') continue;
+    if (ch !== '\\' || i + 1 >= raw.length) {
+      out += ch;
+      continue;
+    }
+
+    const code = raw[i + 1];
+    i++;
+    switch (code) {
+      case 'P':
+      case 'X':
+      case 'N':
+        out += '\n';
+        break;
+      case '~':
+        out += ' ';
+        break;
+      case '\\':
+      case '{':
+      case '}':
+        out += code;
+        break;
+      case 'L': case 'l': case 'O': case 'o': case 'K': case 'k':
+        break;
+      case 'U':
+      case 'M': {
+        const escape = raw.slice(i - 1).match(/^\\(U\+[0-9A-Fa-f]{4}|M\+[1-5][0-9A-Fa-f]{4})/);
+        if (escape) {
+          out += decodeTextValue(escape[0], false);
+          i += escape[0].length - 2;
+        } else {
+          out += code;
+        }
+        break;
+      }
+      case 'S': {
+        // Stacked text: numerator and denominator split by ^, / or #.
+        const end = raw.indexOf(';', i + 1);
+        const body = raw.slice(i + 1, end < 0 ? raw.length : end);
+        out += body.replace(/\\(.)/g, '$1').split(/[\^/#]/).map((part) => part.trim()).filter(Boolean).join('/');
+        i = end < 0 ? raw.length : end;
+        break;
+      }
+      default: {
+        // Formatting codes with an argument (\f, \H, \W, \Q, \T, \A, \C, \c, \p …)
+        if (/[A-Za-z]/.test(code)) {
+          const end = raw.indexOf(';', i + 1);
+          i = end < 0 ? raw.length : end;
+        } else {
+          out += code;
+        }
+      }
+    }
+  }
+  return decodePercentCodes(out);
+}
+
+/** Code pages behind MTEXT/TEXT `\M+n` multibyte escapes. */
+const MULTIBYTE_ENCODINGS: Record<string, string> = {
+  '1': 'shift_jis',
+  '2': 'big5',
+  '3': 'euc-kr',
+  '4': 'euc-kr', // Johab has no TextDecoder label; EUC-KR covers the common range
+  '5': 'gbk',
+};
+
+/**
+ * Decodes the text value of a TEXT or ATTRIB: `\U+XXXX` and `\M+nXXXX`
+ * character escapes, then (unless `percent` is false) the `%%` codes.
+ */
+function decodeTextValue(raw: string, percent = true): string {
+  const decoded = raw
+    .replace(/\\U\+([0-9A-Fa-f]{4})/g, (_m, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/\\M\+([1-5])([0-9A-Fa-f]{4})/g, (match, page: string, hex: string) => {
+      try {
+        const bytes = new Uint8Array([parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2), 16)]);
+        return new TextDecoder(MULTIBYTE_ENCODINGS[page], { fatal: true }).decode(bytes);
+      } catch {
+        return match;
+      }
+    });
+  return percent ? decodePercentCodes(decoded) : decoded;
 }
 
 /**
@@ -1305,7 +1575,7 @@ function cleanMtext(raw: string): string {
  * tolerance reads "%%p0.5" on screen. Underline and overline are toggles with
  * no plain-text equivalent, so they are dropped rather than shown.
  */
-function decodeControlCodes(raw: string): string {
+function decodePercentCodes(raw: string): string {
   return raw
     .replace(/%%[uUoO]/g, '')
     .replace(/%%[dD]/g, '°')
@@ -1319,7 +1589,8 @@ function decodeControlCodes(raw: string): string {
 function formatDimensionText(e: IDimensionEntity): string {
   const measurement = formatNumber(e.actualMeasurement);
   if (!e.text) return measurement;
-  return e.text.includes('<>') ? e.text.replace('<>', measurement) : e.text;
+  // Dimension text overrides are MTEXT, and `<>` stands for the measurement.
+  return cleanMtext(e.text.split('<>').join(measurement));
 }
 
 function formatNumber(value: number | undefined): string {
@@ -1329,32 +1600,45 @@ function formatNumber(value: number | undefined): string {
 
 /** Rough advance width of a glyph relative to the font size, for sans-serif text. */
 const GLYPH_WIDTH_RATIO = 0.6;
-const LINE_HEIGHT_RATIO = 1.2;
+/** Distance between MTEXT baselines in text heights; matches the renderer. */
+const LINE_SPACING = 5 / 3;
+/** Descenders reach this far below the baseline, in text heights. */
+const DESCENT = 0.25;
 
 /**
  * Corners of the box a text entity occupies, in drawing coordinates.
  *
- * Bounds used to consider only the anchor point, so fit-to-view clipped any
- * label extending past it — a large title placed at the edge of a drawing was
- * cut in half. The width is estimated from the character count, which is
- * approximate but far closer than treating text as a zero-size point.
+ * The width is estimated from the character count, which is approximate but
+ * far closer than treating text as a zero-size point. The box follows the
+ * alignment the renderer uses: right-aligned text runs back from its anchor,
+ * and extra MTEXT lines run downward. Viewports cull on this box, so getting
+ * the side wrong drops text that reaches into the window.
  */
 function textBoxCorners(e: TextEntity): Point2D[] {
   const lines = e.text.split('\n');
   const longest = lines.reduce((max, line) => Math.max(max, line.length), 0);
   const width = longest * e.height * GLYPH_WIDTH_RATIO;
-  const top = lines.length * e.height * LINE_HEIGHT_RATIO;
-  const bottom = -e.height * 0.25; // descenders sit below the baseline
+  const block = e.height * (1 + (lines.length - 1) * LINE_SPACING);
+
+  const left = e.hAlign === 'right' ? -width : e.hAlign === 'center' ? -width / 2 : 0;
+  let bottom: number;
+  switch (e.vAlign) {
+    case 'top': bottom = -block; break;
+    case 'middle': bottom = -block / 2; break;
+    case 'bottom': bottom = 0; break;
+    default: bottom = -(block - e.height) - e.height * DESCENT; // baseline of the first line
+  }
+  const top = e.vAlign === undefined || e.vAlign === 'baseline' ? e.height : bottom + block;
 
   const radians = (e.rotation * Math.PI) / 180;
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
 
   return [
-    { x: 0, y: bottom },
-    { x: width, y: bottom },
-    { x: width, y: top },
-    { x: 0, y: top },
+    { x: left, y: bottom },
+    { x: left + width, y: bottom },
+    { x: left + width, y: top },
+    { x: left, y: top },
   ].map((corner) => ({
     x: e.position.x + corner.x * cos - corner.y * sin,
     y: e.position.y + corner.x * sin + corner.y * cos,

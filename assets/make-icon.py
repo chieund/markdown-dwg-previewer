@@ -4,28 +4,28 @@ Sinh icon.png cho extension DWG Previewer.
 
     python3 assets/make-icon.py
 
-Vẽ ở độ phân giải gấp 4 lần rồi thu nhỏ bằng LANCZOS để cạnh mượt.
-Motif: một mặt bằng hình chữ L kiểu bản vẽ kỹ thuật, kèm đường kích thước —
-đọc được cả ở 32px trên thanh sidebar của VS Code.
+Drawn at 4x resolution, then downscaled with LANCZOS for smooth edges.
+Motif: an L-shaped floor plan in technical-drawing style, with a dimension line —
+legible even at 32px in the VS Code sidebar.
 """
 from PIL import Image, ImageDraw
 
-OUT = 256          # kích thước icon xuất ra
-SS = 4             # hệ số supersampling
+OUT = 256          # output icon size
+SS = 4             # supersampling factor
 S = OUT * SS
 
-# Bảng màu — nền tối hợp cả theme sáng lẫn tối của VS Code
+# Palette — a dark background that suits both light and dark VS Code themes
 BG_TOP = (30, 42, 56)       # #1E2A38
 BG_BOTTOM = (14, 22, 32)    # #0E1620
 GRID = (44, 62, 80)         # #2C3E50
-PLAN = (79, 195, 247)       # #4FC3F7  cyan — nét chính
+PLAN = (79, 195, 247)       # #4FC3F7  cyan — main lines
 PLAN_FILL = (79, 195, 247, 30)
-DETAIL = (232, 238, 244)    # #E8EEF4  gần trắng — chi tiết tròn
-DIM = (240, 180, 41)        # #F0B429  hổ phách — đường kích thước
+DETAIL = (232, 238, 244)    # #E8EEF4  near white — round detail
+DIM = (240, 180, 41)        # #F0B429  amber — dimension line
 
 
 def px(v):
-    """Đổi toạ độ trong hệ 256 sang hệ đã supersample."""
+    """Converts 256-unit coordinates to the supersampled grid."""
     return v * SS
 
 
@@ -43,11 +43,11 @@ def vertical_gradient(size, top, bottom):
     return grad.resize((size, size), Image.Resampling.BILINEAR)
 
 
-# ── Nền ────────────────────────────────────────────────────────────────────
+# ── Background ───────────────────────────────────────────────────────────────
 base = vertical_gradient(S, BG_TOP, BG_BOTTOM).convert('RGBA')
 base.putalpha(rounded_mask(S, px(56)))
 
-# ── Lưới blueprint ─────────────────────────────────────────────────────────
+# ── Blueprint grid ───────────────────────────────────────────────────────────
 grid = Image.new('RGBA', (S, S), (0, 0, 0, 0))
 gd = ImageDraw.Draw(grid)
 for i in range(1, 8):
@@ -57,26 +57,26 @@ for i in range(1, 8):
 grid.putalpha(Image.composite(grid.getchannel('A'), Image.new('L', (S, S), 0), rounded_mask(S, px(56))))
 base = Image.alpha_composite(base, grid)
 
-# ── Nét vẽ ─────────────────────────────────────────────────────────────────
+# ── Linework ─────────────────────────────────────────────────────────────────
 art = Image.new('RGBA', (S, S), (0, 0, 0, 0))
 d = ImageDraw.Draw(art)
 
-# Mặt bằng hình chữ L — góc khuyết đủ lớn để còn nhận ra ở 32px
+# L-shaped plan — the notch is large enough to read at 32px
 LEFT, RIGHT, TOP, BOT = 44, 212, 56, 158
 NOTCH_X, NOTCH_Y = 120, 104
 plan = [(LEFT, BOT), (LEFT, TOP), (NOTCH_X, TOP), (NOTCH_X, NOTCH_Y), (RIGHT, NOTCH_Y), (RIGHT, BOT)]
 d.polygon([(px(x), px(y)) for x, y in plan], fill=PLAN_FILL, outline=PLAN, width=px(11))
 
-# Hình tròn chi tiết (cột / lỗ khoan) trong cánh phải
+# Detail circle (column / drill hole) in the right wing
 cx, cy, r = 176, 131, 17
 d.ellipse([px(cx - r), px(cy - r), px(cx + r), px(cy + r)], outline=DETAIL, width=px(8))
 
-# Đường kích thước: extension line kéo từ bản vẽ xuống, rồi tới dimension line
+# Dimension: extension lines drop from the plan, then the dimension line
 dim_y, ext_top, ext_bot = 188, 166, 196
 for x in (LEFT, RIGHT):
     d.line([(px(x), px(ext_top)), (px(x), px(ext_bot))], fill=DIM + (150,), width=px(4))
 d.line([(px(LEFT), px(dim_y)), (px(RIGHT), px(dim_y))], fill=DIM, width=px(7))
-# Gạch chéo 45° ở hai đầu — ký hiệu kích thước kiểu kiến trúc
+# 45° ticks at both ends — architectural dimension style
 for x in (LEFT, RIGHT):
     d.line([(px(x - 7), px(dim_y + 7)), (px(x + 7), px(dim_y - 7))], fill=DIM, width=px(6))
 
@@ -86,7 +86,7 @@ icon = base.resize((OUT, OUT), Image.Resampling.LANCZOS)
 icon.save('icon.png', 'PNG', optimize=True)
 print(f'icon.png  {OUT}x{OUT}')
 
-# Bản xem thử ở kích thước hiển thị thật trên sidebar
+# Previews at the real sidebar display sizes
 for size in (32, 64):
     icon.resize((size, size), Image.Resampling.LANCZOS).save(f'assets/preview-{size}.png')
     print(f'assets/preview-{size}.png')

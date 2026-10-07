@@ -5,8 +5,6 @@
  * DWG → DXF entirely in-process. No external tool installation required.
  * Supports AutoCAD R14 through 2020+.
  *
- * Fallback: @mlightcad/libdxfrw-web (lighter WASM, works for simpler files).
- *
  * Last resort: External CLI tool (dwg2dxf or ODA File Converter) if configured.
  */
 
@@ -16,12 +14,13 @@ import { execFile } from 'child_process';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import { promisify } from 'util';
+import { decodeDxfBuffer } from './encoding';
 
 const execFileAsync = promisify(execFile);
 
-// Lazy-loaded WASM modules
-let libredwgModule: any = null;
-let libdxfrwModule: any = null;
+// Lazy-loaded WASM modules. The *promise* is cached, so two drawings opened at
+// once share one instance instead of each instantiating (and leaking) its own.
+let libredwgModule: Promise<any> | null = null;
 
 /** Optional logger — set by the extension to pipe diagnostics to an OutputChannel. */
 let log: (msg: string) => void = () => {};
@@ -39,36 +38,23 @@ function describeError(err: unknown): string {
  * Loads the libredwg WASM module (GNU LibreDWG — most capable parser).
  * Uses dynamic import() since the WASM JS file is ESM.
  */
-async function getLibredwgModule(): Promise<any> {
-  if (libredwgModule) return libredwgModule;
-  try {
-    const wasmPath = path.resolve(__dirname, '..', 'node_modules', '@mlightcad', 'libredwg-web', 'wasm', 'libredwg-web.js');
-    // pathToFileURL ensures Windows paths (C:\...) become valid file:// URLs for ESM import()
-    const wasmUrl = pathToFileURL(wasmPath).href;
-    const { default: createModule } = await import(wasmUrl);
-    libredwgModule = await createModule();
-    log('libredwg-web WASM loaded successfully');
-    return libredwgModule;
-  } catch (err) {
-    log(`libredwg-web WASM load failed: ${describeError(err)}`);
-    return null;
-  }
-}
-
-/**
- * Loads the libdxfrw WASM module (lighter, fallback).
- */
-async function getLibdxfrwModule(): Promise<any> {
-  if (libdxfrwModule) return libdxfrwModule;
-  try {
-    const createModule = require('@mlightcad/libdxfrw-web/dist/libdxfrw.js');
-    libdxfrwModule = await createModule();
-    log('libdxfrw-web WASM loaded successfully');
-    return libdxfrwModule;
-  } catch (err) {
-    log(`libdxfrw-web WASM load failed: ${describeError(err)}`);
-    return null;
-  }
+function getLibredwgModule(): Promise<any> {
+  libredwgModule ??= (async () => {
+    try {
+      const wasmPath = path.resolve(__dirname, '..', 'node_modules', '@mlightcad', 'libredwg-web', 'wasm', 'libredwg-web.js');
+      // pathToFileURL ensures Windows paths (C:\...) become valid file:// URLs for ESM import()
+      const wasmUrl = pathToFileURL(wasmPath).href;
+      const { default: createModule } = await import(wasmUrl);
+      const module = await createModule();
+      log('libredwg-web WASM loaded successfully');
+      return module;
+    } catch (err) {
+      log(`libredwg-web WASM load failed: ${describeError(err)}`);
+      libredwgModule = null; // let the next drawing try again
+      return null;
+    }
+  })();
+  return libredwgModule;
 }
 
 /**
@@ -98,8 +84,9 @@ async function convertWithLibredwg(dwgBuffer: Buffer): Promise<string | null> {
       log(`libredwg dwg_write_dxf returned ${result} (warnings), output file exists`);
     }
 
-    // Read DXF from virtual filesystem
-    const dxfContent = libredwg.FS.readFile('/output.dxf', { encoding: 'utf8' });
+    // Read DXF from virtual filesystem. Older DXF versions are written in the
+    // drawing's code page (e.g. Shift-JIS), so decode the bytes ourselves.
+    const dxfContent = decodeDxfBuffer(libredwg.FS.readFile('/output.dxf'));
 
     if (!dxfContent || !dxfContent.trim()) {
       log('libredwg produced empty DXF output');
@@ -118,58 +105,11 @@ async function convertWithLibredwg(dwgBuffer: Buffer): Promise<string | null> {
 }
 
 /**
- * Secondary converter: libdxfrw via WASM.
- * Lighter weight, works for many DWG files but fails on complex ones.
- */
-async function convertWithLibdxfrw(dwgBuffer: Buffer): Promise<string | null> {
-  const libdxfrw = await getLibdxfrwModule();
-  if (!libdxfrw) return null;
-
-  let database: any = null;
-  let fileHandler: any = null;
-  let dwg: any = null;
-
-  try {
-    database = new libdxfrw.DRW_Database();
-    fileHandler = new libdxfrw.DRW_FileHandler();
-    fileHandler.database = database;
-
-    const uint8 = new Uint8Array(dwgBuffer);
-    dwg = new libdxfrw.DRW_DwgR(uint8);
-
-    if (!dwg.read(fileHandler, false)) {
-      log('libdxfrw DRW_DwgR.read() returned false');
-      return null;
-    }
-
-    const dxfContent = fileHandler.fileExport(
-      libdxfrw.DRW_Version.AC1021, false, database, false
-    );
-
-    if (!(dxfContent && dxfContent.trim())) {
-      log('libdxfrw fileExport produced empty output');
-      return null;
-    }
-
-    log(`libdxfrw conversion OK: ${(dxfContent.length / 1024).toFixed(0)}KB DXF`);
-    return dxfContent;
-  } catch (err) {
-    log(`libdxfrw conversion error: ${describeError(err)}`);
-    return null;
-  } finally {
-    try { dwg?.delete(); } catch { /* ignore */ }
-    try { fileHandler?.delete(); } catch { /* ignore */ }
-    try { database?.delete(); } catch { /* ignore */ }
-  }
-}
-
-/**
  * Converts a DWG buffer to DXF text.
  *
- * Strategy (all bundled, zero-install):
- * 1. libredwg-web WASM (GNU LibreDWG — handles all DWG files)
- * 2. libdxfrw-web WASM (fallback for edge cases)
- * 3. External CLI tool (if user configured one)
+ * Strategy:
+ * 1. libredwg-web WASM (bundled, zero-install — GNU LibreDWG)
+ * 2. External CLI tool on PATH (dwg2dxf or ODA File Converter), as a fallback
  */
 export async function convertDwgToDxf(
   dwgBuffer: Buffer,
@@ -185,27 +125,22 @@ export async function convertDwgToDxf(
   }
 
   // Try libredwg-web first (most capable, handles large/complex files)
-  log('Strategy 1/3: libredwg-web WASM');
+  log('Strategy 1/2: libredwg-web WASM');
   const libredwgResult = await convertWithLibredwg(dwgBuffer);
   if (libredwgResult) return libredwgResult;
 
-  // Fall back to libdxfrw-web (lighter, sometimes works when libredwg doesn't)
-  log('Strategy 2/3: libdxfrw-web WASM');
-  const libdxfrwResult = await convertWithLibdxfrw(dwgBuffer);
-  if (libdxfrwResult) return libdxfrwResult;
-
   // Last resort: CLI tool on PATH
-  log('Strategy 3/3: searching PATH for an external CLI converter');
+  log('Strategy 2/2: searching PATH for an external CLI converter');
   const tool = await findConverter();
   if (tool) {
     log(`Found CLI converter: ${tool}`);
     return convertWithCli(dwgBuffer, dwgPath, tool);
   }
 
-  log('No external converter found — all three strategies exhausted');
+  log('No external converter found — both strategies exhausted');
   throw new Error(
     'Failed to convert DWG file.\n\n' +
-      'The bundled converters could not process this file.\n\n' +
+      'The bundled converter could not process this file.\n\n' +
       'You can install an external converter as fallback:\n' +
       '  • LibreDWG (provides dwg2dxf): sudo apt install libredwg-utils\n' +
       '  • ODA File Converter: https://www.opendesign.com/guestfiles/oda_file_converter\n\n' +
@@ -236,7 +171,7 @@ async function convertWithCli(dwgBuffer: Buffer, dwgPath: string, tool: string):
         log(`CLI ${toolName} exited non-zero (may still have written output): ${describeError(err)}`);
       }
     }
-    const dxfContent = await fs.readFile(tmpDxf, 'utf-8');
+    const dxfContent = decodeDxfBuffer(await fs.readFile(tmpDxf));
     if (!dxfContent.trim()) throw new Error('Converter produced an empty DXF file.');
     log(`CLI conversion OK: ${(dxfContent.length / 1024).toFixed(0)}KB DXF`);
     return dxfContent;

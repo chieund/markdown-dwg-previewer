@@ -1,14 +1,13 @@
-# Everything the extension needs is bundled into out/extension.js and
-# out/webview/main.js. The WASM converters (@mlightcad/libredwg-web and
-# @mlightcad/libdxfrw-web) are kept in node_modules since they load .wasm
-# at runtime — converter.ts resolves them relative to out/.
+# Everything the extension needs is bundled into out/extension.js, out/worker.js and
+# out/webview/main.js. The WASM converter (@mlightcad/libredwg-web) is kept
+# in node_modules since it loads .wasm at runtime — converter.ts resolves it
+# relative to out/.
 
 .git/**
 .github/**
 .vscode/**
 .claude/**
 node_modules/**
-!node_modules/@mlightcad/libdxfrw-web/**
 !node_modules/@mlightcad/libredwg-web/**
 
 src/**

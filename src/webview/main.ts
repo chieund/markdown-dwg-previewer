@@ -9,6 +9,8 @@ import {
   zoomCentre,
 } from './panZoom';
 import { toPngBase64, toStandaloneSvg } from './export';
+import { carryOverView, initialHiddenLayers } from './sceneState';
+import { LayerIndex } from './layerIndex';
 
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void };
 
@@ -38,6 +40,9 @@ let cursorPoint: { x: number; y: number } | null = null;
 let statusBar: HTMLElement | null = null;
 let visibleEntityCount = 0;
 let pageSelect: HTMLSelectElement | null = null;
+/** Elements of the page on screen by layer, so a layer toggle never re-renders. */
+let layerIndex = new LayerIndex<SVGElement>();
+let emptyState: HTMLElement | null = null;
 
 function fitBounds(bounds: Bounds): ViewBox {
   const width = bounds.maxX - bounds.minX || 1;
@@ -82,48 +87,42 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
 
   const styleGroup = document.createElementNS(SVG_NS, 'g');
 
+  const index = new LayerIndex<SVGElement>();
+  layerIndex = index;
+
   // Viewport content sits behind the sheet
   for (const view of page.viewports ?? []) {
-    const el = renderViewport(view, hiddenLayers);
+    const el = renderViewport(view, hiddenLayers, index);
     if (el) styleGroup.appendChild(el);
   }
 
-  // Filter visible entities
-  const visibleEntities = page.entities.filter(e => !hiddenLayers.has(e.layer));
+  // Every entity is drawn, hidden layers included: switching a layer back on
+  // then only flips its elements' display instead of rendering the page again.
+  const entities = page.entities;
+  const draw = (target: Node, from: number, to: number) => {
+    for (let i = from; i < to; i++) {
+      const entity = entities[i];
+      const el = renderEntity(entity);
+      index.add(entity.layer, el, hiddenLayers);
+      if (el) target.appendChild(el);
+    }
+  };
 
   const BATCH_SIZE = 3000;
+  draw(styleGroup, 0, Math.min(BATCH_SIZE, entities.length));
 
-  if (visibleEntities.length <= BATCH_SIZE) {
-    // Small drawing: render all at once
-    for (const entity of visibleEntities) {
-      const el = renderEntity(entity);
-      if (el) styleGroup.appendChild(el);
-    }
-  } else {
-    // Large drawing: render first batch immediately, rest progressively
-    for (let i = 0; i < BATCH_SIZE; i++) {
-      const el = renderEntity(visibleEntities[i]);
-      if (el) styleGroup.appendChild(el);
-    }
-
-    // Render remaining entities in batches via requestAnimationFrame
+  if (entities.length > BATCH_SIZE) {
+    // Large drawing: render the rest progressively so the UI stays responsive
     let offset = BATCH_SIZE;
     const renderNextBatch = () => {
       // Bail if a newer renderCanvas call has started
       if (renderGeneration !== thisGeneration) return;
-      if (offset >= visibleEntities.length) return;
-
-      const end = Math.min(offset + BATCH_SIZE, visibleEntities.length);
+      const end = Math.min(offset + BATCH_SIZE, entities.length);
       const fragment = document.createDocumentFragment();
-      for (let i = offset; i < end; i++) {
-        const el = renderEntity(visibleEntities[i]);
-        if (el) fragment.appendChild(el);
-      }
+      draw(fragment, offset, end);
       styleGroup.appendChild(fragment);
       offset = end;
-      if (offset < visibleEntities.length) {
-        requestAnimationFrame(renderNextBatch);
-      }
+      if (offset < entities.length) requestAnimationFrame(renderNextBatch);
     };
     requestAnimationFrame(renderNextBatch);
   }
@@ -135,7 +134,6 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
 
   const fitted = page.bounds ? fitBounds(page.bounds) : EMPTY_VIEW;
   fittedView = fitted;
-  visibleEntityCount = visibleEntities.length + countVisibleViewportEntities(page, hiddenLayers);
 
   applyViewBox(svg, previousView ?? fitted);
   disposeActivePanZoom = attachPanZoom(svg, () => applyViewBox(svg, fitted), updateStatusBar);
@@ -151,11 +149,32 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
     updateStatusBar();
   });
 
-  // Nothing on screen must never be a bare rectangle — say why it is empty.
-  if (visibleEntityCount === 0) {
-    host.appendChild(buildEmptyState(page, hiddenLayers));
-  }
+  emptyState = null;
+  refreshVisibleCount(page, hiddenLayers);
+}
 
+/**
+ * Applies the hidden-layer set to the page already on screen. Batches still
+ * waiting for an animation frame read the same set when they draw, so they
+ * arrive with the right visibility.
+ */
+function applyLayerVisibility(): void {
+  if (!scene || !canvasHost) return;
+  layerIndex.apply(scene.hiddenLayers);
+  refreshVisibleCount(scene.pages[scene.pageIndex], scene.hiddenLayers);
+}
+
+function refreshVisibleCount(page: DxfPage, hiddenLayers: Set<string>): void {
+  const visibleOnPage = page.entities.filter((e) => !hiddenLayers.has(e.layer)).length;
+  visibleEntityCount = visibleOnPage + countVisibleViewportEntities(page, hiddenLayers);
+
+  // Nothing on screen must never be a bare rectangle — say why it is empty.
+  emptyState?.remove();
+  emptyState = null;
+  if (visibleEntityCount === 0 && canvasHost) {
+    emptyState = buildEmptyState(page, hiddenLayers);
+    canvasHost.appendChild(emptyState);
+  }
   updateStatusBar();
 }
 
@@ -201,7 +220,7 @@ function buildEmptyState(page: DxfPage, hiddenLayers: Set<string>): HTMLElement 
     action.addEventListener('click', () => {
       for (const layer of page.layers) hiddenLayers.delete(layer.name);
       refreshLayerControl();
-      redraw(true);
+      applyLayerVisibility();
     });
     box.appendChild(action);
     return box;
@@ -314,9 +333,8 @@ function updateStatusBar(): void {
 
 let clipCounter = 0;
 
-function renderViewport(view: ViewportView, hiddenLayers: Set<string>): SVGElement | null {
-  const visible = view.entities.filter((entity) => !hiddenLayers.has(entity.layer));
-  if (visible.length === 0) return null;
+function renderViewport(view: ViewportView, hiddenLayers: Set<string>, index: LayerIndex<SVGElement>): SVGElement | null {
+  if (view.entities.length === 0) return null;
 
   const group = document.createElementNS(SVG_NS, 'g');
   const id = `dwg-viewport-${clipCounter++}`;
@@ -337,8 +355,9 @@ function renderViewport(view: ViewportView, hiddenLayers: Set<string>): SVGEleme
 
   const content = document.createElementNS(SVG_NS, 'g');
   content.setAttribute('clip-path', `url(#${id})`);
-  for (const entity of visible) {
+  for (const entity of view.entities) {
     const el = renderEntity(entity);
+    index.add(entity.layer, el, hiddenLayers);
     if (el) content.appendChild(el);
   }
   group.appendChild(content);
@@ -367,6 +386,7 @@ function buildPageSelect(scene: Scene): HTMLElement | null {
     option.textContent = page.name;
     select.appendChild(option);
   });
+  select.value = String(scene.pageIndex);
   select.addEventListener('change', () => goToPage(Number(select.value)));
   pageSelect = select;
   return select;
@@ -429,7 +449,7 @@ function buildLayerControl(scene: Scene): HTMLElement | null {
     }
     syncCheckboxes();
     updateButton();
-    redraw(true);
+    applyLayerVisibility();
   };
 
   const isolate = (name: string) => {
@@ -437,7 +457,7 @@ function buildLayerControl(scene: Scene): HTMLElement | null {
     scene.hiddenLayers.delete(name);
     syncCheckboxes();
     updateButton();
-    redraw(true);
+    applyLayerVisibility();
   };
 
   for (const [label, visible] of [
@@ -466,7 +486,7 @@ function buildLayerControl(scene: Scene): HTMLElement | null {
       if (box.checked) scene.hiddenLayers.delete(layer.name);
       else scene.hiddenLayers.add(layer.name);
       updateButton();
-      redraw(true);
+      applyLayerVisibility();
     });
     checkboxes.set(layer.name, box);
 
@@ -549,31 +569,41 @@ function buildExportControls(): HTMLElement {
   return group;
 }
 
-function buildSkippedBanner(skippedEntityTypes: string[]): HTMLElement | null {
-  if (skippedEntityTypes.length === 0) return null;
-
+function buildBanner(text: string): HTMLElement {
   const banner = document.createElement('span');
   banner.className = 'dwg-banner';
 
   const label = document.createElement('span');
   label.className = 'dwg-banner-text';
-  label.textContent = `Not supported: ${skippedEntityTypes.join(', ')}`;
-  label.title = label.textContent;
+  label.textContent = text;
+  label.title = text;
   banner.appendChild(label);
 
   const dismiss = document.createElement('button');
   dismiss.className = 'dwg-banner-dismiss';
   dismiss.textContent = '×';
   dismiss.title = 'Dismiss';
-  dismiss.setAttribute('aria-label', 'Dismiss unsupported entity notice');
+  dismiss.setAttribute('aria-label', 'Dismiss notice');
   dismiss.addEventListener('click', () => banner.remove());
   banner.appendChild(dismiss);
 
   return banner;
 }
 
-function renderScene(pages: DxfPage[], skippedEntityTypes: string[]) {
-  scene = { pages, hiddenLayers: new Set(), pageIndex: 0, skippedEntityTypes };
+function buildSkippedBanner(skippedEntityTypes: string[]): HTMLElement | null {
+  if (skippedEntityTypes.length === 0) return null;
+  return buildBanner(`Not supported: ${skippedEntityTypes.join(', ')}`);
+}
+
+function renderScene(pages: DxfPage[], skippedEntityTypes: string[], warnings: string[] = []) {
+  // A reload (the file was saved again) keeps the user's page, layers and zoom.
+  const previous = scene;
+  const previousView = activeSvg ? getViewBox(activeSvg) : null;
+  const carried = previous
+    ? carryOverView({ pageName: previous.pages[previous.pageIndex]?.name, hiddenLayers: previous.hiddenLayers }, pages)
+    : { pageIndex: 0, hiddenLayers: initialHiddenLayers(pages), keepView: false };
+
+  scene = { pages, hiddenLayers: carried.hiddenLayers, pageIndex: carried.pageIndex, skippedEntityTypes };
   activeSvg = null;
   pageSelect = null;
   statusBar = null;
@@ -593,9 +623,11 @@ function renderScene(pages: DxfPage[], skippedEntityTypes: string[]) {
     buildZoomControls(),
     buildExportControls(),
     buildSkippedBanner(skippedEntityTypes),
+    ...warnings.map(buildBanner),
   ]) {
     if (control) toolbar.appendChild(control);
   }
+  toolbarEl = toolbar;
 
   canvasHost = document.createElement('div');
   canvasHost.className = 'dwg-canvas';
@@ -605,6 +637,24 @@ function renderScene(pages: DxfPage[], skippedEntityTypes: string[]) {
   root.appendChild(buildStatusBar());
   refreshLayerControl();
   redraw(false);
+  if (carried.keepView && previousView && activeSvg) {
+    applyViewBox(activeSvg, previousView);
+    updateStatusBar();
+  }
+}
+
+let toolbarEl: HTMLElement | null = null;
+
+/**
+ * A reload that fails — typically the file read mid-save — must not replace a
+ * drawing the user is looking at with an error page; the next save will fix it.
+ */
+function showReloadError(message: string) {
+  if (!toolbarEl) return;
+  toolbarEl.querySelector('.dwg-reload-error')?.remove();
+  const banner = buildBanner(`Reload failed — showing the previous version. ${message.split('\n')[0]}`);
+  banner.classList.add('dwg-reload-error');
+  toolbarEl.appendChild(banner);
 }
 
 function describe(err: unknown): string {
@@ -612,6 +662,8 @@ function describe(err: unknown): string {
 }
 
 function showError(message: string) {
+  scene = null;
+  toolbarEl = null;
   root.innerHTML = '';
   const pre = document.createElement('pre');
   pre.className = 'dwg-error';
@@ -621,20 +673,22 @@ function showError(message: string) {
 
 window.addEventListener('message', (event) => {
   const message = event.data as
-    | { type: 'DXF_DATA'; pages: DxfPage[]; skippedEntityTypes: string[] }
+    | { type: 'DXF_DATA'; pages: DxfPage[]; skippedEntityTypes: string[]; warnings?: string[] }
     | { type: 'DXF_ERROR'; message: string }
     | { type: 'DXF_PROGRESS'; stage: string };
 
   if (message.type === 'DXF_DATA') {
     try {
-      renderScene(message.pages, message.skippedEntityTypes);
+      renderScene(message.pages, message.skippedEntityTypes, message.warnings);
     } catch (err) {
       showError(`Error rendering drawing:\n${describe(err)}`);
     }
   } else if (message.type === 'DXF_ERROR') {
-    showError(message.message);
+    if (scene) showReloadError(message.message);
+    else showError(message.message);
   } else if (message.type === 'DXF_PROGRESS') {
-    showProgress(message.stage);
+    // While a drawing is on screen, a reload works in the background.
+    if (!scene) showProgress(message.stage);
   }
 });
 

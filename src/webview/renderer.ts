@@ -178,8 +178,38 @@ function renderText(
   else if (vAlign === 'bottom') el.setAttribute('dominant-baseline', 'text-after-edge');
 
   el.setAttribute('transform', `translate(${position.x} ${position.y}) scale(1,-1) rotate(${-rotationDeg})`);
-  el.textContent = text;
+
+  // SVG folds a newline into a space, so each MTEXT line needs its own tspan.
+  const lines = text.split('\n');
+  if (lines.length === 1) {
+    el.textContent = text;
+    return el;
+  }
+  lines.forEach((line, index) => {
+    const span = document.createElementNS(SVG_NS, 'tspan');
+    span.setAttribute('x', '0');
+    span.setAttribute('dy', `${index === 0 ? firstLineOffset(lines.length, vAlign) : LINE_SPACING}em`);
+    // An empty tspan has no height, which would swallow a blank line.
+    span.textContent = line || '\u00a0';
+    el.appendChild(span);
+  });
   return el;
+}
+
+/** Distance between MTEXT baselines, in text heights — AutoCAD's default spacing. */
+export const LINE_SPACING = 5 / 3;
+
+/**
+ * Where the first of `lineCount` lines sits relative to the anchor, in text
+ * heights (downward is positive, as the text is drawn un-flipped). The block of
+ * lines hangs from a top anchor, centres on a middle one and rests on a bottom one.
+ */
+export function firstLineOffset(lineCount: number, vAlign?: 'baseline' | 'bottom' | 'middle' | 'top'): number {
+  if (lineCount <= 1) return 0;
+  const extra = (lineCount - 1) * LINE_SPACING;
+  if (vAlign === 'middle') return -extra / 2;
+  if (vAlign === 'bottom') return -extra;
+  return 0;
 }
 
 export function arcToPathData(center: Point2D, radius: number, startAngle: number, endAngle: number): string {

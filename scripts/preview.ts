@@ -1,18 +1,19 @@
 /**
- * Preview harness — dựng lại webview thật ra một file HTML độc lập, để chụp
- * màn hình bằng Chromium headless mà không cần mở VS Code.
+ * Preview harness — rebuilds the real webview as a standalone HTML file so it can
+ * be screenshotted with headless Chromium, without opening VS Code.
  *
- *   npm run preview -- <file.dwg|file.dxf> [thư-mục-xuất]
+ *   npm run preview -- <file.dwg|file.dxf> [output-folder]
  *
- * Dùng đúng CSS (`src/webview/styles.ts`) và đúng bundle webview
- * (`out/webview/main.js`) mà bản đóng gói dùng, nên ảnh chụp phản ánh giao diện
- * thật chứ không phải một bản dựng lại gần giống.
+ * Uses the same CSS (`src/webview/styles.ts`) and the same webview bundle
+ * (`out/webview/main.js`) as the packaged extension, so screenshots show the real
+ * UI rather than a lookalike.
  */
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { convertDwgToDxf } from '../src/dwg/converter';
+import { decodeDxfBuffer } from '../src/dwg/encoding';
 import { detectDrawingFormat } from '../src/dwg/format';
 import { parseDxf } from '../src/dxf/parseDxf';
 import { WEBVIEW_STYLES } from '../src/webview/styles';
@@ -31,15 +32,15 @@ function findBrowser(): string {
       /* try the next one */
     }
   }
-  throw new Error(`Không tìm thấy Chromium. Đã thử: ${BROWSERS.join(', ')}`);
+  throw new Error(`Chromium not found. Tried: ${BROWSERS.join(', ')}`);
 }
 
 async function toDxfText(filePath: string): Promise<string> {
   const buffer = fs.readFileSync(filePath);
   const format = detectDrawingFormat(buffer);
-  if (format === 'dxf-text') return buffer.toString('utf-8');
+  if (format === 'dxf-text') return decodeDxfBuffer(buffer);
   if (format === 'dwg') return convertDwgToDxf(buffer, filePath, '');
-  throw new Error(`Không đọc được định dạng: ${format}`);
+  throw new Error(`Unreadable format: ${format}`);
 }
 
 /**
@@ -61,6 +62,18 @@ function interactionScript(action: string | undefined): string {
   }
   if (action === 'hidden') {
     return `document.querySelectorAll('.dwg-layer-action')[1]?.click();`;
+  }
+  if (action === 'isolate') {
+    // "only" on the Walls layer — every other layer switched off in place
+    return `[...document.querySelectorAll('.dwg-layer-row')]
+      .find((row) => row.textContent.includes('Walls'))
+      ?.querySelector('.dwg-layer-isolate')?.click();`;
+  }
+  if (action === 'roundtrip') {
+    // Hide everything, then show it again: must end exactly where it started
+    return `
+      document.querySelectorAll('.dwg-layer-action')[1]?.click();
+      document.querySelectorAll('.dwg-layer-action')[0]?.click();`;
   }
   return '';
 }
@@ -100,7 +113,7 @@ async function main(): Promise<void> {
   const action = args.find((a) => a.startsWith('--'))?.slice(2);
   const [source, outDirArg] = args.filter((a) => !a.startsWith('--'));
   if (!source) {
-    console.error('Thiếu file.\n  npm run preview -- <file.dwg|file.dxf> [thư-mục-xuất]');
+    console.error('Missing file.\n  npm run preview -- <file.dwg|file.dxf> [output-folder]');
     process.exit(2);
   }
 
@@ -108,7 +121,8 @@ async function main(): Promise<void> {
   fs.mkdirSync(outDir, { recursive: true });
 
   const dxf = await toDxfText(source);
-  const parsed = parseDxf(dxf);
+  const isDxf = detectDrawingFormat(fs.readFileSync(source)) === 'dxf-text';
+  const parsed = parseDxf(dxf, { trustLayerOffFlags: isDxf });
   const entities = parsed.pages.reduce((sum, page) => sum + page.entities.length, 0);
   console.log(
     `${path.basename(source)} → ${parsed.pages.length} page, ${entities} entity, ` +
@@ -145,7 +159,7 @@ async function main(): Promise<void> {
   );
 
   fs.rmSync(tmpHtml, { force: true });
-  console.log(`  ảnh: ${path.relative(process.cwd(), target)}`);
+  console.log(`  image: ${path.relative(process.cwd(), target)}`);
 }
 
 void main();

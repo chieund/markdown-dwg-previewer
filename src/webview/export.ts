@@ -1,5 +1,19 @@
+import { ViewBox, getViewBox } from './panZoom';
+
 const EXPORT_BACKGROUND = '#1e1e1e';
 const PNG_MAX_EDGE = 2400;
+
+/**
+ * The rectangle to paint behind an exported view.
+ *
+ * Percentages would resolve from the user-space origin, not from the viewBox,
+ * so a drawing away from (0,0) — nearly every real one — exported with no
+ * background at all. Covering the viewBox itself, with a margin for viewers
+ * that letterbox, always fills what is on screen.
+ */
+export function exportBackground(view: ViewBox): ViewBox {
+  return { x: view.x - view.w, y: view.y - view.h, w: view.w * 3, h: view.h * 3 };
+}
 
 export function toStandaloneSvg(svg: SVGSVGElement): string {
   const clone = svg.cloneNode(true) as SVGSVGElement;
@@ -10,11 +24,12 @@ export function toStandaloneSvg(svg: SVGSVGElement): string {
   clone.setAttribute('height', String(Math.round(height)));
   clone.removeAttribute('style');
 
+  const area = exportBackground(getViewBox(svg));
   const background = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-  background.setAttribute('x', '-100%');
-  background.setAttribute('y', '-100%');
-  background.setAttribute('width', '300%');
-  background.setAttribute('height', '300%');
+  background.setAttribute('x', String(area.x));
+  background.setAttribute('y', String(area.y));
+  background.setAttribute('width', String(area.w));
+  background.setAttribute('height', String(area.h));
   background.setAttribute('fill', EXPORT_BACKGROUND);
   clone.insertBefore(background, clone.firstChild);
 

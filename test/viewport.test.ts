@@ -135,3 +135,23 @@ test('viewports with impossible dimensions are rejected', () => {
 
   assert.deepEqual(scanViewports(text), []);
 });
+
+test('the view target offsets the view centre — a panned viewport can keep its centre at the origin', () => {
+  // Real file (blocks_and_tables_-_metric.dwg): 12/22 = (-3218, -2501), 17/27 = (3361, 2671)
+  const m = viewportTransform(viewport({ viewCenter: { x: -3000, y: -2000 }, target: { x: 4000, y: 4000 } }));
+  const placed = applyToPoint(m, { x: 1000, y: 2000 });
+
+  near(placed.x, 100);
+  near(placed.y, 50);
+});
+
+test('scanViewports reads the view target (17/27)', () => {
+  const text = dxf(
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'VIEWPORT', '10', '100', '20', '50', '40', '40', '41', '20',
+    '12', '-3000', '22', '-2000', '17', '4000', '27', '4000', '45', '200',
+    '0', 'ENDSEC'
+  );
+
+  assert.deepEqual(scanViewports(text)[0].target, { x: 4000, y: 4000 });
+});

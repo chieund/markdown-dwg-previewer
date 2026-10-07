@@ -99,6 +99,8 @@ export interface LayerInfo {
   name: string;
   color: string;
   entityCount: number;
+  /** Switched off in the CAD file itself; the viewer starts with it hidden. */
+  off?: boolean;
 }
 
 export interface ViewportView {
@@ -117,4 +119,6 @@ export interface DxfPage {
 export interface ParsedDxf {
   pages: DxfPage[];
   skippedEntityTypes: string[];
+  /** Problems worth telling the user about, e.g. a drawing cut short at the entity limit. */
+  warnings?: string[];
 }

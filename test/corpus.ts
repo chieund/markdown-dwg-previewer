@@ -1,22 +1,23 @@
 /**
- * Corpus test — chạy pipeline thật (DWG → DXF → parse) trên cả một thư mục .dwg
- * và báo cáo kết quả từng file.
+ * Corpus test — runs the real pipeline (DWG → DXF → parse) over a whole folder of
+ * drawings and reports the result for each file.
  *
- *   npm run test:corpus -- /đường/dẫn/tới/thư-mục
- *   npm run test:corpus -- /đường/dẫn/tới/thư-mục --save
+ *   npm run test:corpus -- /path/to/folder
+ *   npm run test:corpus -- /path/to/folder --save
  *
- * Lần chạy đầu dùng --save để ghi baseline (test/corpus-baseline.json). Các lần
- * sau chạy không cờ sẽ đối chiếu với baseline và báo đỏ nếu có file tụt entity
- * hoặc chuyển từ chạy được sang lỗi — đây chính là lưới an toàn khi refactor
+ * The first run uses --save to record a baseline (test/corpus-baseline.json). Later
+ * runs without the flag compare against it and flag any file that lost entities
+ * or went from working to failing — the safety net for refactoring
  * parser.
  *
- * Bundle ra out-test/ để __dirname nằm đúng một cấp dưới gốc project, giống hệt
- * out/extension.js lúc chạy thật — nhờ vậy converter tìm WASM theo đúng đường
- * dẫn nó sẽ dùng trong bản đóng gói.
+ * Bundled into out-test/ so __dirname sits one level below the project root, just
+ * like out/extension.js at runtime — so the converter finds the WASM along the
+ * same path it uses in the packaged extension.
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import { convertDwgToDxf, setConverterLogger } from '../src/dwg/converter';
+import { decodeDxfBuffer } from '../src/dwg/encoding';
 import { describeUnreadableFormat, detectDrawingFormat } from '../src/dwg/format';
 import { parseDxf } from '../src/dxf/parseDxf';
 
@@ -31,6 +32,8 @@ interface FileResult {
   parseMs?: number;
   pages?: number;
   entities?: number;
+  /** Model geometry drawn through paper-space viewports; a broken viewport shows up only here. */
+  viewportEntities?: number;
   layers?: number;
   blocks?: number;
   skipped?: string[];
@@ -62,7 +65,7 @@ async function runFile(filePath: string, logLines: string[]): Promise<FileResult
     const convertStart = Date.now();
     let dxf: string;
     if (format === 'dxf-text') {
-      dxf = buffer.toString('utf-8');
+      dxf = decodeDxfBuffer(buffer);
     } else if (format === 'dwg') {
       dxf = await convertDwgToDxf(buffer, filePath, '');
     } else {
@@ -72,11 +75,15 @@ async function runFile(filePath: string, logLines: string[]): Promise<FileResult
     result.dxfKB = Math.round(dxf.length / 1024);
 
     const parseStart = Date.now();
-    const parsed = parseDxf(dxf);
+    const parsed = parseDxf(dxf, { trustLayerOffFlags: format === 'dxf-text' });
     result.parseMs = Date.now() - parseStart;
 
     result.pages = parsed.pages.length;
     result.entities = parsed.pages.reduce((sum, page) => sum + page.entities.length, 0);
+    result.viewportEntities = parsed.pages.reduce(
+      (sum, page) => sum + (page.viewports ?? []).reduce((n, view) => n + view.entities.length, 0),
+      0
+    );
     result.layers = new Set(parsed.pages.flatMap((p) => p.layers.map((l) => l.name))).size;
     result.skipped = parsed.skippedEntityTypes.slice().sort();
     result.ok = true;
@@ -127,15 +134,15 @@ function printSkippedSummary(results: FileResult[]): void {
   }
   if (counts.size === 0) return;
 
-  console.log('\nEntity chưa vẽ được (số file gặp phải — chính là danh sách nên làm tiếp):');
+  console.log('\nEntities not drawn yet (number of files affected — the to-do list):');
   for (const [type, count] of [...counts].sort((a, b) => b[1] - a[1])) {
-    console.log(`  ${pad(type, 20)} ${count} file`);
+    console.log(`  ${pad(type, 20)} ${count} file(s)`);
   }
 }
 
 function compareWithBaseline(results: FileResult[]): number {
   if (!fs.existsSync(BASELINE)) {
-    console.log('\nChưa có baseline. Chạy lại kèm --save để ghi lại kết quả hiện tại làm mốc.');
+    console.log('\nNo baseline yet. Run again with --save to record the current results as the baseline.');
     return 0;
   }
 
@@ -147,28 +154,33 @@ function compareWithBaseline(results: FileResult[]): number {
   for (const now of results) {
     const was = before.get(now.file);
     if (!was) {
-      improvements.push(`${now.file}: file mới trong corpus`);
+      improvements.push(`${now.file}: new file in the corpus`);
       continue;
     }
     if (was.ok && !now.ok) {
-      regressions.push(`${now.file}: trước chạy được, giờ lỗi — ${now.error}`);
+      regressions.push(`${now.file}: worked before, fails now — ${now.error}`);
     } else if (!was.ok && now.ok) {
-      improvements.push(`${now.file}: trước lỗi, giờ chạy được`);
+      improvements.push(`${now.file}: failed before, works now`);
     } else if (was.ok && now.ok && was.entities !== now.entities) {
       const delta = now.entities! - was.entities!;
-      const line = `${now.file}: ${was.entities} → ${now.entities} entity (${delta > 0 ? '+' : ''}${delta})`;
+      const line = `${now.file}: ${was.entities} → ${now.entities} entities (${delta > 0 ? '+' : ''}${delta})`;
+      (delta < 0 ? regressions : improvements).push(line);
+    }
+    if (was.ok && now.ok && was.viewportEntities !== undefined && was.viewportEntities !== now.viewportEntities) {
+      const delta = now.viewportEntities! - was.viewportEntities;
+      const line = `${now.file}: ${was.viewportEntities} → ${now.viewportEntities} entities in viewports (${delta > 0 ? '+' : ''}${delta})`;
       (delta < 0 ? regressions : improvements).push(line);
     }
   }
 
   for (const was of baseline) {
     if (!results.some((r) => r.file === was.file)) {
-      console.log(`  (bỏ qua) ${was.file} có trong baseline nhưng không còn trong thư mục`);
+      console.log(`  (skipped) ${was.file} is in the baseline but no longer in the folder`);
     }
   }
 
   if (improvements.length) {
-    console.log('\nThay đổi theo hướng tốt lên:');
+    console.log('\nImprovements:');
     for (const line of improvements) console.log('  + ' + line);
   }
   if (regressions.length) {
@@ -176,7 +188,7 @@ function compareWithBaseline(results: FileResult[]): number {
     for (const line of regressions) console.log('  - ' + line);
   }
   if (!improvements.length && !regressions.length) {
-    console.log('\nKhớp baseline hoàn toàn.');
+    console.log('\nMatches the baseline exactly.');
   }
 
   return regressions.length;
@@ -188,24 +200,24 @@ async function main(): Promise<void> {
   const dir = args.find((a) => !a.startsWith('--')) ?? process.env.DWG_CORPUS;
 
   if (!dir) {
-    console.error('Thiếu thư mục.\n  npm run test:corpus -- /đường/dẫn/tới/thư-mục [--save]');
+    console.error('Missing folder.\n  npm run test:corpus -- /path/to/folder [--save]');
     process.exit(2);
   }
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
-    console.error(`Không phải thư mục: ${dir}`);
+    console.error(`Not a folder: ${dir}`);
     process.exit(2);
   }
 
   const files = findDrawings(dir);
   if (files.length === 0) {
-    console.error(`Không tìm thấy file .dwg / .dxf nào trong ${dir}`);
+    console.error(`No .dwg / .dxf files found in ${dir}`);
     process.exit(2);
   }
 
   const logLines: string[] = [];
   setConverterLogger((msg) => logLines.push(msg));
 
-  console.log(`Chạy ${files.length} bản vẽ từ ${dir}`);
+  console.log(`Running ${files.length} drawings from ${dir}`);
 
   const results: FileResult[] = [];
   for (const file of files) {
@@ -222,13 +234,13 @@ async function main(): Promise<void> {
   const failed = results.filter((r) => !r.ok).length;
   const empty = results.filter((r) => r.ok && r.entities === 0).length;
   console.log(
-    `\n${results.length - failed}/${results.length} file convert + parse thành công` +
-    (empty ? `, ${empty} file ra 0 entity (cần xem lại)` : '')
+    `\n${results.length - failed}/${results.length} files converted + parsed` +
+    (empty ? `, ${empty} with 0 entities (worth a look)` : '')
   );
 
   if (save) {
     fs.writeFileSync(BASELINE, JSON.stringify(results, null, 2) + '\n');
-    console.log(`Đã ghi baseline: ${path.relative(process.cwd(), BASELINE)}`);
+    console.log(`Baseline saved: ${path.relative(process.cwd(), BASELINE)}`);
     process.exit(failed > 0 ? 1 : 0);
   }
 

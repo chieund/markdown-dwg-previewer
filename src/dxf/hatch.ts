@@ -10,6 +10,8 @@ import { Point2D } from './types';
  * vanish. This scanner recovers them from the raw group codes.
  */
 export interface RawHatch {
+  /** Entity handle (group 5), used to put the hatch back at its place in the draw order. */
+  handle?: string;
   layer: string;
   colorIndex?: number;
   inPaperSpace: boolean;
@@ -22,6 +24,8 @@ export interface RawHatch {
   patternScale: number;
   /** Boundary loops, already flattened to polygons. Inner loops cut holes. */
   loops: Point2D[][];
+  /** Extrusion direction (210/220/230); the loops are in this OCS. */
+  extrusion?: { x: number; y: number; z: number };
 }
 
 const ARC_SEGMENTS_PER_TURN = 64;
@@ -100,16 +104,23 @@ function parseHatch(body: Pair[], blockName: string | null): RawHatch | null {
     loops: [],
   };
 
+  const extrusion = { x: 0, y: 0, z: 1 };
   let index = 0;
   // Header: everything before the first boundary path (group 92).
   for (; index < body.length && body[index][0] !== 92; index++) {
     const [code, value] = body[index];
-    if (code === 8) hatch.layer = value;
+    if (code === 5) hatch.handle = value;
+    else if (code === 210) extrusion.x = Number(value);
+    else if (code === 220) extrusion.y = Number(value);
+    else if (code === 230) extrusion.z = Number(value);
+    else if (code === 8) hatch.layer = value;
     else if (code === 62) hatch.colorIndex = Number(value);
     else if (code === 67) hatch.inPaperSpace = Number(value) === 1;
     else if (code === 2) hatch.patternName = value;
     else if (code === 70) hatch.solid = Number(value) === 1;
   }
+
+  if (extrusion.x !== 0 || extrusion.y !== 0 || extrusion.z !== 1) hatch.extrusion = extrusion;
 
   while (index < body.length) {
     if (body[index][0] !== 92) {
