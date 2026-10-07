@@ -40,8 +40,8 @@ next to the code that parses them.
 - **Click to inspect** — click any line of a block to select the whole block and see its layer,
   position, rotation, scale and attributes
 - **Quantities** — count every block (`Door-900` × 14) and measure linework and area per layer,
-  in the units the drawing declares; shift-click a few objects to add up their length and area,
-  and copy the table straight into a spreadsheet
+  in the units the drawing declares (or the one you pick, when it declares none); shift-click a
+  few objects to add up their length and area, and copy the table straight into a spreadsheet
 - **Compare drawings** — *Compare with HEAD* (Git), *Compare with File…* or two selected files:
   added objects in green, removed in red, changed in yellow over their old shape, with a list of
   every change to step through (F7)

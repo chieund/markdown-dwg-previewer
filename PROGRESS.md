@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-08
 
-**Status:** quantity takeoff implemented (spec `docs/superpowers/specs/2026-10-07-quantity-takeoff-design.md`) — 247 unit tests, typecheck clean. Review fixes (2026-10-08) on branch `feat/add-new`, test build `dwg-previewer-1.1.0-test.vsix`.
+**Status:** v1.2.0 packaged (`dwg-previewer-1.2.0.vsix`) on branch `feat/add-new` — quantity takeoff (spec `docs/superpowers/specs/2026-10-07-quantity-takeoff-design.md`) + review fixes. 247 unit tests, typecheck clean. Not yet merged, pushed or published.
 
 **Opens:** `.dwg` and `.dxf` · **247 unit tests** · **corpus 17/17** (not re-run for this change; entity counts are untouched) · typecheck clean
 
@@ -503,16 +503,18 @@ View conversion logs: **View → Output → select "DWG Previewer"** in the drop
 
 ## 📝 Changelog
 
-### 2026-10-08 · unreleased · Project review fixes
+### 2026-10-08 · v1.2.0 · Quantity takeoff + project review fixes
 - **Arc length**: an ARC crossing 0° (300° → 30°) measured 270° instead of 90°; `arcSweep` normalises counter-clockwise, with a remainder so a corrupt angle cannot hang `sampleArc` / `sampleEllipse`
 - **Areas** convert by the square of the unit factor (24 000 m² → 24 m² for a 6 × 4 m room)
 - **Self-inserting block**: a 300-byte DXF expanded 6^16 times and hung the worker. The parser now budgets visited entities (20× the entity limit), and `DrawingWorker` fails a job after 2 minutes, restarts the worker and resends the jobs queued behind it
 - **Title blocks on layouts 2+** keep their ATTRIBs (sheet name, drawing number), drawn and searchable. Attributes of INSERTs nested inside ordinary blocks are still not drawn
 - **Unitless drawings**: the quantities panel asks "1 unit = mm/cm/m/in/ft" instead of treating a drawing unit as a metre; the choice survives a reload
 - **CI**: `.github/workflows/ci.yml` — typecheck, unit tests and `vsce package` on every push to master and every PR
+- **Quantities panel**: layer colour swatch per row, columns aligned under their headings, a bold Total row, the selected row marked, a drawn magnifier in place of the ⌖ glyph (a box in fonts that lack it); the inspector opens beside the panel instead of on top of it
+- **Quantities button**: a page switch removed the open panel from the page while it still counted as open, so the next press closed it and nothing appeared; an error while opening now shows on the toolbar
 - 240 → 247 unit tests. `npm run test:corpus` still not re-run — the corpus is not on this machine
 
-### 2026-10-07 · unreleased · Quantity takeoff
+### 2026-10-07 · v1.2.0 · Quantity takeoff
 - **Quantities panel**: *Quantities* counts every block under its real name (`Door-900`, not `*B24`) and measures each layer's objects, length, area and hatch area
 - Exact where the shape allows it: circles, arcs and bulge segments use their real formulas; ellipses and sampled splines are corrected for the polygon they were sampled into
 - Shift+click builds a multi-selection; the status bar totals its length and area. ⌖ on a row selects those objects and zooms to them
@@ -521,7 +523,7 @@ View conversion logs: **View → Output → select "DWG Previewer"** in the drop
 - Hatches keep their own area column: the polyline they fill is already counted in "Area"
 - 183 → 240 unit tests
 
-### 2026-10-07 · unreleased · Visual diff
+### 2026-10-07 · v1.1.0 · Visual diff
 - **Compare drawings**: *DWG: Compare with HEAD* (Explorer, editor title button, Source Control changes), *Compare with File…*, *Compare Selected Drawings* (two files in Explorer)
 - Objects matched by handle (AutoCAD keeps them across saves), so a moved door is "changed", not removed + added; falls back to content signatures when handles were renumbered or are missing
 - View: unchanged faded, removed red, old shape of changed red dashed, new shape yellow, added green; toggles with counts, change list, F7 / Shift+F7, zoom + marker per change
@@ -529,7 +531,7 @@ View conversion logs: **View → Output → select "DWG Previewer"** in the drop
 - Spec: `docs/superpowers/specs/2026-10-07-visual-diff-design.md`; preview harness `--diff=<older file>[#n]`
 - 157 → 183 unit tests; self-diff of all 17 corpus drawings reports 0 changes
 
-### 2026-10-07 · unreleased · Find + object inspector
+### 2026-10-07 · v1.1.0 · Find + object inspector
 - **Find (Ctrl+F)** across every page: text, attributes (hidden ones too), block names, layers and entity types, grouped by kind; Enter / Shift+Enter step through results, which switch page, zoom to the hit and highlight it
 - **Click to inspect**: clicking any line of a block selects the whole INSERT; a panel shows type, block, layer, handle, position, rotation, scale and attributes
 - Parser: `ParsedDxf.objects` (one per top-level entity) and `obj` on every drawn entity; ATTRIBs linked to their INSERT by handle

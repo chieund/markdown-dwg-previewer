@@ -10,7 +10,7 @@ Preview 2D AutoCAD DWG drawings directly in VS Code — opens the drawing as a r
 - **Layer control** — show/hide layers individually or all at once
 - **Find** — Ctrl+F searches text, attributes, block names, layers and object types on every page
 - **Inspect** — click an object to select it (a whole block at once) and see its properties
-- **Quantities** — count blocks and measure linework and area per layer, in the drawing's own units
+- **Quantities** — count blocks and measure linework and area per layer, in the drawing's own units (or one you pick)
 - **Compare** — visual diff against Git `HEAD`, another file, or two selected files
 - **Multi-page** — switch between Model Space and Paper Space sheets
 - **Export** — save the current view as SVG or PNG
@@ -59,7 +59,7 @@ AutoCAD R14 through AutoCAD 2020 (AC1014 – AC1032).
 | Click an object | Select it and open the inspector (Esc to clear) |
 | Shift+click | Add / remove an object from the selection (length and area in the status bar) |
 | *Quantities* | Count blocks, measure length / area / hatch area per layer, copy or export as CSV |
-| ⌖ on a quantities row | Select those objects and zoom to them |
+| 🔍 on a quantities row | Select those objects and zoom to them |
 | *DWG: Compare with HEAD / with File… / Selected* | Open the visual diff (Explorer, editor title, Source Control) |
 | F7 / Shift+F7 (diff view) | Next / previous change |
 
