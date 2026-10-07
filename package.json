@@ -2,7 +2,7 @@
   "name": "dwg-previewer",
   "displayName": "AutoCAD DWG & DXF Previewer",
   "description": "View AutoCAD DWG and DXF drawings inside VS Code — no AutoCAD needed. Open .dwg and .dxf files instantly with pan, zoom, layer control and SVG/PNG export.",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "publisher": "bumkom",
   "license": "GPL-3.0-or-later",
   "icon": "icon.png",
