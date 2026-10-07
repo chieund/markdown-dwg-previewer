@@ -14,6 +14,8 @@ export interface Point2D {
 interface EntityBase {
   layer: string;
   color: string;
+  /** Index into `ParsedDxf.objects`: the top-level object (e.g. the outermost INSERT) this was drawn for. */
+  obj?: number;
   linetype?: string;
   lineweight?: number;
 }
@@ -116,9 +118,79 @@ export interface DxfPage {
   viewports?: ViewportView[];
 }
 
+export interface Attribute {
+  tag: string;
+  value: string;
+  /** An invisible attribute: not drawn, but still part of the block's data. */
+  hidden?: boolean;
+}
+
+/**
+ * One top-level entity of the file, as the user thinks of it: a door block is
+ * one object however many lines it expands to. Search and the inspector work
+ * on these; drawn entities point back at them through `obj`.
+ */
+export interface ObjectInfo {
+  /** DXF entity type: INSERT, LINE, TEXT … */
+  type: string;
+  layer: string;
+  handle?: string;
+  /** Index of the page the object sits on. */
+  page: number;
+  /** INSERT only. */
+  block?: string;
+  position?: Point2D;
+  /** Degrees. */
+  rotation?: number;
+  scale?: { x: number; y: number };
+  attributes?: Attribute[];
+  /** TEXT, MTEXT and DIMENSION: the text as displayed. */
+  text?: string;
+  /** Nothing was drawn for it (invisible, unsupported, or cut off by the entity limit). */
+  empty?: true;
+}
+
 export interface ParsedDxf {
   pages: DxfPage[];
+  objects: ObjectInfo[];
   skippedEntityTypes: string[];
   /** Problems worth telling the user about, e.g. a drawing cut short at the entity limit. */
+  warnings?: string[];
+}
+
+export type ChangeKind = 'added' | 'removed' | 'changed';
+
+export interface DiffChange {
+  kind: ChangeKind;
+  /** e.g. `Changed · TEXT "LIVING ROOM" → "LOUNGE"`. */
+  label: string;
+  /** Covers both the old and the new shape. */
+  bounds: Bounds | null;
+}
+
+/**
+ * One page of a comparison. Entities of added, removed and changed objects
+ * carry `obj` = the index of their entry in `changes`, so the view can
+ * highlight a change; unchanged entities carry none.
+ */
+export interface DiffPage {
+  name: string;
+  bounds: Bounds | null;
+  unchanged: DxfEntity[];
+  added: DxfEntity[];
+  removed: DxfEntity[];
+  changedOld: DxfEntity[];
+  changedNew: DxfEntity[];
+  changes: DiffChange[];
+  /** The newer side's viewports, shown as context; their content is not compared. */
+  viewports?: ViewportView[];
+}
+
+export interface DrawingDiff {
+  oldLabel: string;
+  newLabel: string;
+  pages: DiffPage[];
+  /** False when handles did not line up and objects were matched by their content. */
+  handleMatching: boolean;
   warnings?: string[];
 }

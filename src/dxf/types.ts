@@ -18,4 +18,6 @@ export {
   ViewportView,
   DxfPage,
   ParsedDxf,
+  ObjectInfo,
+  Attribute,
 } from '../shared/types';

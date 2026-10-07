@@ -16,6 +16,7 @@ import { convertDwgToDxf } from '../src/dwg/converter';
 import { decodeDxfBuffer } from '../src/dwg/encoding';
 import { detectDrawingFormat } from '../src/dwg/format';
 import { parseDxf } from '../src/dxf/parseDxf';
+import { diffDrawings } from '../src/diff/diffDrawings';
 import { WEBVIEW_STYLES } from '../src/webview/styles';
 
 const WIDTH = 1400;
@@ -48,6 +49,55 @@ async function toDxfText(filePath: string): Promise<string> {
  * a filtered list — can be captured too.
  */
 function interactionScript(action: string | undefined): string {
+  if (action?.startsWith('steps=')) {
+    const [steps, page] = action.slice('steps='.length).split('@').map(Number);
+    return `
+      const select = document.querySelector('.dwg-page-select');
+      if (select && ${page} >= 0) { select.value = '${page}'; select.dispatchEvent(new Event('change')); }
+      for (let i = 0; i < ${steps}; i++) window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F7' }));`;
+  }
+  if (action?.startsWith('search=')) {
+    // Ctrl+F, type the query, then Enter to the first result — or the n-th, with search=<query>#<n>
+    const [text, nth] = action.slice('search='.length).split('#');
+    const query = JSON.stringify(text);
+    return `
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true }));
+      const box = document.querySelector('.dwg-search-panel input');
+      box.value = ${query};
+      for (let i = 0; i < ${Number(nth) || 1}; i++) box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));`;
+  }
+  if (action?.startsWith('click=')) {
+    // click=<page>,<x>,<y>: open a page, then click the given drawing coordinates.
+    // The browser's own transform finds the pixel, so the check does not trust our maths.
+    const [page, x, y] = action.slice('click='.length).split(',').map(Number);
+    return `
+      const select = document.querySelector('.dwg-page-select');
+      if (select) { select.value = '${page}'; select.dispatchEvent(new Event('change')); }
+      setTimeout(() => {
+        const svg = document.querySelector('.dwg-canvas svg');
+        const flip = svg.querySelector('g');
+        const at = new DOMPoint(${x}, ${y}).matrixTransform(flip.getScreenCTM());
+        const init = { bubbles: true, clientX: at.x, clientY: at.y, button: 0 };
+        svg.dispatchEvent(new MouseEvent('mousemove', init));
+        svg.dispatchEvent(new MouseEvent('mousedown', init));
+        window.dispatchEvent(new MouseEvent('mouseup', init));
+        svg.dispatchEvent(new MouseEvent('click', init));
+      }, 300);`;
+  }
+  if (action?.startsWith('inspect=')) {
+    // A real click on the middle of the first text containing the given string
+    const needle = JSON.stringify(action.slice('inspect='.length));
+    return `
+      const target = [...document.querySelectorAll('.dwg-canvas svg text')].find((t) => t.textContent.includes(${needle}));
+      if (target) {
+        const r = target.getBoundingClientRect();
+        const init = { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0 };
+        const svg = document.querySelector('.dwg-canvas svg');
+        svg.dispatchEvent(new MouseEvent('mousedown', init));
+        window.dispatchEvent(new MouseEvent('mouseup', init));
+        svg.dispatchEvent(new MouseEvent('click', init));
+      }`;
+  }
   if (action === 'layers') {
     return `document.querySelector('.dwg-layer-button')?.click();`;
   }
@@ -78,9 +128,9 @@ function interactionScript(action: string | undefined): string {
   return '';
 }
 
-function buildHtml(parsed: ReturnType<typeof parseDxf>, action?: string): string {
+function buildHtml(message: object, action?: string): string {
   const bundle = fs.readFileSync(path.resolve(__dirname, '..', 'out', 'webview', 'main.js'), 'utf-8');
-  const payload = JSON.stringify({ type: 'DXF_DATA', ...parsed })
+  const payload = JSON.stringify(message)
     .replace(/</g, '\\u003c')
     .replace(/\u2028/g, '\\u2028')
     .replace(/\u2029/g, '\\u2029');
@@ -138,9 +188,25 @@ async function main(): Promise<void> {
   const stageDir = path.resolve(__dirname, '..', 'out-test', 'preview-tmp');
   fs.mkdirSync(stageDir, { recursive: true });
   const tmpHtml = path.join(stageDir, `${name}.html`);
-  fs.writeFileSync(tmpHtml, buildHtml(parsed, action), 'utf-8');
+  // --diff=<older file>: render the comparison of that file (old) against this one (new)
+  let message: object = { type: 'DXF_DATA', ...parsed };
+  if (action?.startsWith('diff=')) {
+    // diff=<older file>[#n][@page]: optionally open a page and press F7 n times
+    const olderPath = action.slice('diff='.length).split(/[#@]/)[0];
+    const older = parseDxf(await toDxfText(olderPath), {
+      trustLayerOffFlags: detectDrawingFormat(fs.readFileSync(olderPath)) === 'dxf-text',
+    });
+    message = { type: 'DIFF_DATA', diff: diffDrawings(older, parsed, path.basename(olderPath), path.basename(source)) };
+  }
+  const diffSteps = action?.startsWith('diff=') ? Number(action.match(/#(\d+)/)?.[1] ?? 0) : 0;
+  const diffPage = action?.startsWith('diff=') ? Number(action.match(/@(\d+)/)?.[1] ?? -1) : -1;
+  fs.writeFileSync(tmpHtml, buildHtml(message, action?.startsWith('diff=') ? `steps=${diffSteps}@${diffPage}` : action), 'utf-8');
 
-  const target = path.join(outDir, `preview-${name}${action ? '-' + action : ''}.png`);
+  // Actions can carry a path (diff=…); keep the file name flat
+  const suffix = action
+    ? '-' + (action.startsWith('diff=') ? `diff${action.replace(/^[^#@]*/, '').replace(/[#@]/g, '-')}` : action.replace(/[^a-z0-9=#,.]+/gi, '-'))
+    : '';
+  const target = path.join(outDir, `preview-${name}${suffix}.png`);
 
   execFileSync(
     findBrowser(),

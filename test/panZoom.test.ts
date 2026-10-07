@@ -98,3 +98,20 @@ test('the element offset and zoom level are both accounted for', () => {
   near(centre.x, 1200);
   near(centre.y, 2150);
 });
+
+/**
+ * The SVG keeps the drawing's proportions (preserveAspectRatio "xMidYMid meet"),
+ * so a square viewBox in an 800×600 box is drawn 600 px wide with 100 px of
+ * empty margin each side. Reading the cursor as if the drawing were stretched
+ * put the status-bar coordinates, wheel zoom and click-picking off target.
+ */
+test('client points map through the letterbox margins of a proportional drawing', () => {
+  const svg = fakeSvg('0 0 100 100', { left: 0, top: 0, width: 800, height: 600 });
+
+  const leftEdge = clientToViewBox(svg, 100, 300);
+  near(leftEdge.x, 0);
+  near(leftEdge.y, 50);
+  const rightEdge = clientToViewBox(svg, 700, 0);
+  near(rightEdge.x, 100);
+  near(rightEdge.y, 0);
+});

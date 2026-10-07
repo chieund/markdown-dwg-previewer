@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { DwgEditorProvider } from './dwgEditorProvider';
 import { DrawingWorker } from './dwg/workerClient';
+import { registerCompareCommands } from './compareCommands';
 
 export function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('DWG Previewer');
@@ -19,6 +20,7 @@ export function activate(context: vscode.ExtensionContext) {
       { webviewOptions: { retainContextWhenHidden: true } }
     )
   );
+  registerCompareCommands(context, worker);
 }
 
 export function deactivate() {}

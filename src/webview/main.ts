@@ -5,12 +5,21 @@ import {
   applyViewBox,
   attachPanZoom,
   clientToViewBox,
+  fitBounds,
   getViewBox,
+  unitsPerPixel,
   zoomCentre,
 } from './panZoom';
 import { toPngBase64, toStandaloneSvg } from './export';
 import { carryOverView, initialHiddenLayers } from './sceneState';
 import { LayerIndex } from './layerIndex';
+import { ObjectIndex } from './objectIndex';
+import { pickObject } from './pick';
+import { buildInspector } from './inspector';
+import { SearchControl, buildSearchControl } from './searchPanel';
+import type { SearchHit } from './search';
+import type { DrawingDiff, ObjectInfo } from '../shared/types';
+import { renderDiff } from './diffView';
 
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void };
 
@@ -44,17 +53,26 @@ let pageSelect: HTMLSelectElement | null = null;
 let layerIndex = new LayerIndex<SVGElement>();
 let emptyState: HTMLElement | null = null;
 
-function fitBounds(bounds: Bounds): ViewBox {
-  const width = bounds.maxX - bounds.minX || 1;
-  const height = bounds.maxY - bounds.minY || 1;
-  const padding = Math.max(width, height) * 0.05;
-  return {
-    x: bounds.minX - padding,
-    y: -bounds.maxY - padding,
-    w: width + padding * 2,
-    h: height + padding * 2,
-  };
-}
+/** Top-level objects of the whole drawing, for search and the inspector. */
+let objects: ObjectInfo[] = [];
+/** Drawn elements of the page on screen, by object. */
+let objectIndex = new ObjectIndex<SVGElement>();
+/** Selected objects (indices into `objects`), highlighted on the canvas. */
+let selection: number[] = [];
+/** The drawing's content group, dimmed while something is selected. */
+let contentGroup: SVGGElement | null = null;
+/** Group above the content that holds highlighted copies of the selection. */
+let highlightGroup: SVGGElement | null = null;
+let inspector: HTMLElement | null = null;
+let searchControl: SearchControl | null = null;
+
+/** A selection of a whole layer can hold tens of thousands of elements; copying them all would stall. */
+const MAX_HIGHLIGHTED_ELEMENTS = 20_000;
+/** A press that moves less than this is a click, not the start of a pan. */
+const CLICK_SLOP_PX = 4;
+/** How far from a thin line a click still picks it. */
+const PICK_RADIUS_PX = 4;
+
 
 const EMPTY_VIEW: ViewBox = { x: -50, y: -50, w: 100, h: 100 };
 
@@ -89,22 +107,30 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
 
   const index = new LayerIndex<SVGElement>();
   layerIndex = index;
+  const objIndex = new ObjectIndex<SVGElement>();
+  objectIndex = objIndex;
 
   // Viewport content sits behind the sheet
   for (const view of page.viewports ?? []) {
-    const el = renderViewport(view, hiddenLayers, index);
+    const el = renderViewport(view, hiddenLayers, index, objIndex);
     if (el) styleGroup.appendChild(el);
   }
 
   // Every entity is drawn, hidden layers included: switching a layer back on
   // then only flips its elements' display instead of rendering the page again.
   const entities = page.entities;
+  // Register every entity's geometry now, so zooming to a selection is right
+  // even before the later batches have drawn their elements.
+  for (const entity of entities) objIndex.add(entity, null);
   const draw = (target: Node, from: number, to: number) => {
     for (let i = from; i < to; i++) {
       const entity = entities[i];
       const el = renderEntity(entity);
       index.add(entity.layer, el, hiddenLayers);
-      if (el) target.appendChild(el);
+      if (el) {
+        objIndex.attach(entity.obj, el);
+        target.appendChild(el);
+      }
     }
   };
 
@@ -123,11 +149,18 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
       styleGroup.appendChild(fragment);
       offset = end;
       if (offset < entities.length) requestAnimationFrame(renderNextBatch);
+      // The selection may include elements drawn only now
+      else if (selection.length) refreshHighlight();
     };
     requestAnimationFrame(renderNextBatch);
   }
 
   flipGroup.appendChild(styleGroup);
+  const overlay = document.createElementNS(SVG_NS, 'g');
+  overlay.setAttribute('class', 'dwg-highlight');
+  flipGroup.appendChild(overlay);
+  contentGroup = styleGroup;
+  highlightGroup = overlay;
   svg.appendChild(flipGroup);
   host.appendChild(svg);
   activeSvg = svg;
@@ -149,6 +182,23 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
     updateStatusBar();
   });
 
+  // A click (a press that did not turn into a pan) picks the object under it.
+  let pressed: { x: number; y: number } | null = null;
+  svg.addEventListener('mousedown', (event) => {
+    // A click that only closes the open Layers panel must not also select
+    const closingPanel = !!document.querySelector('.dwg-layers .dwg-layer-panel:not([hidden])');
+    pressed = event.button === 0 && !closingPanel ? { x: event.clientX, y: event.clientY } : null;
+  });
+  svg.addEventListener('click', (event) => {
+    if (!pressed) return;
+    const moved = Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y);
+    pressed = null;
+    if (moved > CLICK_SLOP_PX) return;
+    const picked = pickAt(svg, event.clientX, event.clientY);
+    if (picked === undefined) clearSelection();
+    else select([picked], { zoom: false, inspect: true });
+  });
+
   emptyState = null;
   refreshVisibleCount(page, hiddenLayers);
 }
@@ -162,6 +212,7 @@ function applyLayerVisibility(): void {
   if (!scene || !canvasHost) return;
   layerIndex.apply(scene.hiddenLayers);
   refreshVisibleCount(scene.pages[scene.pageIndex], scene.hiddenLayers);
+  if (selection.length) refreshHighlight();
 }
 
 function refreshVisibleCount(page: DxfPage, hiddenLayers: Set<string>): void {
@@ -250,10 +301,115 @@ function buildEmptyState(page: DxfPage, hiddenLayers: Set<string>): HTMLElement 
 
 function goToPage(index: number): void {
   if (!scene) return;
+  clearSelection();
   scene.pageIndex = index;
   if (pageSelect) pageSelect.value = String(index);
   refreshLayerControl();
   redraw(false);
+}
+
+/** The object under a click: measured in drawing coordinates, within a few pixels of tolerance. */
+function pickAt(svg: SVGSVGElement, clientX: number, clientY: number): number | undefined {
+  if (!scene) return undefined;
+  const point = clientToViewBox(svg, clientX, clientY);
+  const pixel = unitsPerPixel(svg);
+  // The scene is drawn through a scale(1,-1) flip
+  return pickObject(scene.pages[scene.pageIndex], { x: point.x, y: -point.y }, PICK_RADIUS_PX * pixel, scene.hiddenLayers);
+}
+
+/** Selects objects: dims the rest, highlights them, and optionally zooms to them and opens the inspector. */
+function select(objs: number[], options: { zoom: boolean; inspect: boolean }): void {
+  selection = objs;
+  refreshHighlight();
+
+  if (options.zoom && activeSvg && fittedView) {
+    const bounds = objectIndex.boundsOf(objs);
+    if (bounds) {
+      const view = fitBounds(bounds);
+      // A lone label or point would fill the screen; keep some context around it.
+      const minWidth = fittedView.w * 0.08;
+      if (view.w < minWidth) {
+        const grow = minWidth / view.w;
+        view.x -= (view.w * (grow - 1)) / 2;
+        view.y -= (view.h * (grow - 1)) / 2;
+        view.w *= grow;
+        view.h *= grow;
+      }
+      applyViewBox(activeSvg, view);
+      updateStatusBar();
+    }
+  }
+
+  inspector?.remove();
+  inspector = null;
+  if (options.inspect && objs.length === 1 && canvasHost) {
+    const info = objects[objs[0]];
+    if (info) {
+      const layer = scene?.pages[scene.pageIndex].layers.find((l) => l.name === info.layer);
+      inspector = buildInspector(info, layer?.color, clearSelection);
+      canvasHost.appendChild(inspector);
+    }
+  }
+}
+
+function clearSelection(): void {
+  if (!selection.length && !inspector) return;
+  selection = [];
+  refreshHighlight();
+  inspector?.remove();
+  inspector = null;
+}
+
+/**
+ * Redraws the highlight copies for the current selection.
+ *
+ * Copies of elements on a hidden layer are skipped, so toggling a layer off
+ * takes its highlight with it. Copies of viewport content go into a group
+ * clipped like the original, or a line that only touches the window would be
+ * highlighted all the way across the sheet. Strokes are made non-scaling and
+ * at least 2px — a solid hatch has no stroke of its own, and a stroke in
+ * drawing units can cover half the screen.
+ */
+function refreshHighlight(): void {
+  if (!highlightGroup || !contentGroup) return;
+  highlightGroup.textContent = '';
+  contentGroup.classList.toggle('dwg-dimmed', selection.length > 0);
+
+  const clipped = new Map<string, SVGGElement>();
+  const elements = objectIndex.elementsOf(selection).slice(0, MAX_HIGHLIGHTED_ELEMENTS);
+  for (const element of elements) {
+    if (element.style.display === 'none') continue;
+
+    const copy = element.cloneNode(true) as SVGElement;
+    // Pattern definitions would duplicate ids; the highlight paints its own fill
+    copy.querySelectorAll('defs').forEach((defs) => defs.remove());
+    for (const part of [copy, ...Array.from(copy.querySelectorAll<SVGElement>('*'))]) {
+      part.setAttribute('vector-effect', 'non-scaling-stroke');
+      const width = Number(part.getAttribute('stroke-width') ?? 0);
+      part.setAttribute('stroke-width', String(Math.max(2, Number.isFinite(width) ? width : 0)));
+    }
+
+    const clip = element.parentElement?.closest('[clip-path]')?.getAttribute('clip-path');
+    let target: SVGGElement = highlightGroup;
+    if (clip) {
+      let group = clipped.get(clip);
+      if (!group) {
+        group = document.createElementNS(SVG_NS, 'g');
+        group.setAttribute('clip-path', clip);
+        highlightGroup.appendChild(group);
+        clipped.set(clip, group);
+      }
+      target = group;
+    }
+    target.appendChild(copy);
+  }
+}
+
+function selectSearchHit(hit: SearchHit): void {
+  if (!scene) return;
+  if (hit.page !== scene.pageIndex && scene.pages[hit.page]) goToPage(hit.page);
+  // Text and attribute hits are single objects worth describing; a whole layer is not.
+  select(hit.objects, { zoom: true, inspect: hit.kind === 'text' || hit.kind === 'attribute' || hit.objects.length === 1 });
 }
 
 function buildZoomControls(): HTMLElement {
@@ -333,7 +489,12 @@ function updateStatusBar(): void {
 
 let clipCounter = 0;
 
-function renderViewport(view: ViewportView, hiddenLayers: Set<string>, index: LayerIndex<SVGElement>): SVGElement | null {
+function renderViewport(
+  view: ViewportView,
+  hiddenLayers: Set<string>,
+  index: LayerIndex<SVGElement>,
+  objIndex: ObjectIndex<SVGElement>
+): SVGElement | null {
   if (view.entities.length === 0) return null;
 
   const group = document.createElementNS(SVG_NS, 'g');
@@ -358,6 +519,7 @@ function renderViewport(view: ViewportView, hiddenLayers: Set<string>, index: La
   for (const entity of view.entities) {
     const el = renderEntity(entity);
     index.add(entity.layer, el, hiddenLayers);
+    objIndex.add(entity, el);
     if (el) content.appendChild(el);
   }
   group.appendChild(content);
@@ -595,7 +757,15 @@ function buildSkippedBanner(skippedEntityTypes: string[]): HTMLElement | null {
   return buildBanner(`Not supported: ${skippedEntityTypes.join(', ')}`);
 }
 
-function renderScene(pages: DxfPage[], skippedEntityTypes: string[], warnings: string[] = []) {
+function renderScene(
+  pages: DxfPage[],
+  skippedEntityTypes: string[],
+  warnings: string[] = [],
+  drawingObjects: ObjectInfo[] = []
+) {
+  objects = drawingObjects;
+  selection = [];
+  inspector = null;
   // A reload (the file was saved again) keeps the user's page, layers and zoom.
   const previous = scene;
   const previousView = activeSvg ? getViewBox(activeSvg) : null;
@@ -617,9 +787,16 @@ function renderScene(pages: DxfPage[], skippedEntityTypes: string[], warnings: s
   layerSlot = document.createElement('div');
   layerSlot.className = 'dwg-layer-slot';
 
+  searchControl = buildSearchControl({
+    objects,
+    pageNames: pages.map((page) => page.name),
+    onSelect: selectSearchHit,
+  });
+
   for (const control of [
     buildPageSelect(scene),
     layerSlot,
+    searchControl.element,
     buildZoomControls(),
     buildExportControls(),
     buildSkippedBanner(skippedEntityTypes),
@@ -673,15 +850,23 @@ function showError(message: string) {
 
 window.addEventListener('message', (event) => {
   const message = event.data as
-    | { type: 'DXF_DATA'; pages: DxfPage[]; skippedEntityTypes: string[]; warnings?: string[] }
+    | { type: 'DXF_DATA'; pages: DxfPage[]; skippedEntityTypes: string[]; warnings?: string[]; objects?: ObjectInfo[] }
     | { type: 'DXF_ERROR'; message: string }
+    | { type: 'DIFF_DATA'; diff: DrawingDiff }
     | { type: 'DXF_PROGRESS'; stage: string };
 
   if (message.type === 'DXF_DATA') {
     try {
-      renderScene(message.pages, message.skippedEntityTypes, message.warnings);
+      renderScene(message.pages, message.skippedEntityTypes, message.warnings, message.objects);
     } catch (err) {
       showError(`Error rendering drawing:\n${describe(err)}`);
+    }
+  } else if (message.type === 'DIFF_DATA') {
+    // The same bundle serves the comparison panel
+    try {
+      renderDiff(root, message.diff);
+    } catch (err) {
+      showError(`Error rendering comparison:\n${describe(err)}`);
     }
   } else if (message.type === 'DXF_ERROR') {
     if (scene) showReloadError(message.message);
@@ -689,6 +874,16 @@ window.addEventListener('message', (event) => {
   } else if (message.type === 'DXF_PROGRESS') {
     // While a drawing is on screen, a reload works in the background.
     if (!scene) showProgress(message.stage);
+  }
+});
+
+window.addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && searchControl) {
+    event.preventDefault();
+    searchControl.open();
+  } else if (event.key === 'Escape') {
+    if (searchControl?.isOpen()) searchControl.close();
+    else clearSelection();
   }
 });
 

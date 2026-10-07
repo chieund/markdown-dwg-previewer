@@ -23,6 +23,9 @@ export function toStandaloneSvg(svg: SVGSVGElement): string {
   clone.setAttribute('width', String(Math.round(width)));
   clone.setAttribute('height', String(Math.round(height)));
   clone.removeAttribute('style');
+  // A selection is a viewing aid, not part of the drawing.
+  clone.querySelectorAll('.dwg-highlight').forEach((group) => group.remove());
+  clone.querySelectorAll('.dwg-dimmed').forEach((group) => group.classList.remove('dwg-dimmed'));
 
   const area = exportBackground(getViewBox(svg));
   const background = document.createElementNS('http://www.w3.org/2000/svg', 'rect');

@@ -8,6 +8,9 @@ Preview 2D AutoCAD DWG drawings directly in VS Code — opens the drawing as a r
 - **Automatic preview** — double-click any `.dwg` file and it opens as a visual drawing
 - **Pan & zoom** — scroll to zoom, drag to pan, double-click to fit
 - **Layer control** — show/hide layers individually or all at once
+- **Find** — Ctrl+F searches text, attributes, block names, layers and object types on every page
+- **Inspect** — click an object to select it (a whole block at once) and see its properties
+- **Compare** — visual diff against Git `HEAD`, another file, or two selected files
 - **Multi-page** — switch between Model Space and Paper Space sheets
 - **Export** — save the current view as SVG or PNG
 - **Live reload** — drawing updates automatically when the file changes on disk
@@ -51,6 +54,10 @@ AutoCAD R14 through AutoCAD 2020 (AC1014 – AC1032).
 | Double-click | Fit drawing to view |
 | Layer checkbox | Hide/show layer (preserves zoom) |
 | Page dropdown | Switch between sheets |
+| Ctrl+F, Enter / Shift+Enter | Find; next / previous result |
+| Click an object | Select it and open the inspector (Esc to clear) |
+| *DWG: Compare with HEAD / with File… / Selected* | Open the visual diff (Explorer, editor title, Source Control) |
+| F7 / Shift+F7 (diff view) | Next / previous change |
 
 ## Configuration (Optional)
 
