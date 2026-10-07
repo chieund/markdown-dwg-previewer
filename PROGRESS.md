@@ -509,7 +509,7 @@ View conversion logs: **View → Output → select "DWG Previewer"** in the drop
 - Find reads every text of a dimension (value and tolerance), not just the first
 - **Code review fixes** (independent reviewer over 769057a..718b4cd):
   - the visit budget is per pass (model, each layout, each viewport); one shared count cut short sheet sets of many detail viewports
-  - the worker runs jobs one at a time (`src/dwg/serial.ts`); before, a DWG awaiting its converter let the next job start, and a stuck job could time out the innocent one
+  - the worker runs jobs one at a time (`src/dwg/serial.ts`); before, a DWG awaiting its converter let the next job start, and a stuck job could time out the innocent one — so drawings now open strictly in turn, and one slow external conversion (up to ~180 s with ODA) delays the drawings opened after it, both sides of a compare included
   - job timeout 300 s, longer than the external converters' own limits; the message no longer blames a self-inserting block
 - Find and the inspector read a dimension as drawn (`3'-6"`, not the raw `42`)
 - **MTEXT** follows its direction vector (11/21), which is how a vertical dimension's text stands upright; otherwise group 50, in degrees (the DXF reference says radians, but AutoCAD and ezdxf write degrees)
