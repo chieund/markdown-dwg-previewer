@@ -144,3 +144,48 @@ test('an R12 attribute (no handles anywhere) still belongs to the INSERT before 
   assert.deepEqual(parsed.objects[insert].attributes, [{ tag: 'TAG', value: 'A1' }]);
   assert.equal(parsed.pages[0].entities.find((e) => e.type === 'TEXT')?.obj, insert);
 });
+
+/**
+ * A second layout lives in a `*Paper_Space0` block record, and its title block's
+ * attributes sit there with it, after the INSERT — not in the ENTITIES section.
+ */
+const titleBlockOnSecondLayout = ({ handles }: { handles: boolean }) => {
+  const h = (handle: string) => (handles ? ['5', handle] : []);
+  return dxf(
+    '0', 'SECTION', '2', 'BLOCKS',
+    '0', 'BLOCK', '2', 'TB', '70', '2', '10', '0', '20', '0', '30', '0',
+    '0', 'LINE', '8', '0', '10', '0', '20', '0', '30', '0', '11', '10', '21', '0', '31', '0',
+    '0', 'ENDBLK',
+    '0', 'BLOCK', '2', '*Paper_Space0', '70', '0', '10', '0', '20', '0', '30', '0',
+    '0', 'INSERT', ...h('B0'), '8', 'TITLE', '66', '1', '2', 'TB', '10', '0', '20', '0', '30', '0',
+    '0', 'ATTRIB', ...h('B1'), '8', '0', '10', '1', '20', '1', '30', '0', '40', '1', '1', 'GROUND FLOOR', '2', 'SHEET', '70', '0',
+    '0', 'ATTRIB', ...h('B2'), '8', '0', '10', '1', '20', '3', '30', '0', '40', '1', '1', 'A-101', '2', 'NUMBER', '70', '0',
+    '0', 'SEQEND', ...h('B3'), '8', '0',
+    '0', 'ENDBLK',
+    '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'LINE', ...h('A0'), '8', '0', '10', '0', '20', '0', '30', '0', '11', '10', '21', '0', '31', '0',
+    '0', 'ENDSEC', '0', 'EOF'
+  );
+};
+
+for (const handles of [true, false]) {
+  test(`a title block on a second layout keeps its attributes (${handles ? 'with' : 'without'} handles)`, () => {
+    const parsed = parseDxf(titleBlockOnSecondLayout({ handles }));
+    const sheet = parsed.pages.findIndex((page) => page.name === 'Paper Space 2');
+    assert.ok(sheet > 0, 'the layout is a page of its own');
+
+    const insert = parsed.objects.findIndex((o) => o.type === 'INSERT');
+    assert.equal(parsed.objects[insert].page, sheet);
+    assert.deepEqual(parsed.objects[insert].attributes, [
+      { tag: 'SHEET', value: 'GROUND FLOOR' },
+      { tag: 'NUMBER', value: 'A-101' },
+    ]);
+
+    const texts = parsed.pages[sheet].entities.filter((e) => e.type === 'TEXT');
+    assert.deepEqual(texts.map((e) => e.type === 'TEXT' && e.text), ['GROUND FLOOR', 'A-101']);
+    assert.ok(texts.every((e) => e.obj === insert && e.layer === 'TITLE'));
+    // Nothing leaks onto the model page
+    assert.equal(parsed.pages[0].entities.some((e) => e.type === 'TEXT'), false);
+  });
+}

@@ -364,8 +364,10 @@ interface RawAttrib {
   style?: string;
   /** Handle of the INSERT the attribute belongs to. */
   insertHandle?: string;
-  /** Position of that INSERT among the ENTITIES section's INSERTs, for files without handles. */
+  /** Position of that INSERT among the INSERTs of its section or block, for files without handles. */
   insertOrdinal: number;
+  /** The block record holding the INSERT, or undefined for the ENTITIES section. */
+  blockName?: string;
   tag: string;
   /** Invisible attribute (flag bit 1): listed in the inspector, never drawn. */
   hidden: boolean;
@@ -383,14 +385,19 @@ interface RawAttrib {
  *
  * ATTRIBs are text labels attached to INSERT entities — they carry labels like
  * room numbers, part IDs, door tags. dxf-parser has no ATTRIB handler and drops
- * them. Their positions are already in world coordinates (the CAD software
- * writes them already transformed by the INSERT's placement).
+ * them. Their positions are already in the coordinates of whatever holds the
+ * INSERT (the CAD software writes them already transformed by its placement).
+ *
+ * Both the ENTITIES section and block records are scanned: a drawing's second
+ * and later layouts live in `*Paper_Space<n>` blocks, title blocks and their
+ * sheet titles included.
  */
 function scanAttribs(text: string): RawAttrib[] {
   const lines = text.split(/\r\n|\r|\n/);
   const attribs: RawAttrib[] = [];
 
   let section: string | null = null;
+  let blockName: string | undefined;
   let inPaperSpace = false;
   let insertLayer = '0';
   let insertHandle: string | undefined;
@@ -401,11 +408,24 @@ function scanAttribs(text: string): RawAttrib[] {
     const value = lines[i + 1].trim();
 
     if (code === '0') {
+      const scanned = section === 'ENTITIES' || (section === 'BLOCKS' && blockName !== undefined);
       if (value === 'SECTION') {
         section = lines[i + 3]?.trim() ?? null;
+        insertOrdinal = -1;
       } else if (value === 'ENDSEC') {
         section = null;
-      } else if (value === 'INSERT' && section === 'ENTITIES') {
+      } else if (value === 'BLOCK' && section === 'BLOCKS') {
+        blockName = '';
+        for (let j = i + 2; j + 1 < lines.length && lines[j].trim() !== '0'; j += 2) {
+          if (lines[j].trim() === '2') {
+            blockName = lines[j + 1].trim();
+            break;
+          }
+        }
+        insertOrdinal = -1;
+      } else if (value === 'ENDBLK') {
+        blockName = undefined;
+      } else if (value === 'INSERT' && scanned) {
         // Track the INSERT's paper-space flag and layer for ATTRIB inheritance
         inPaperSpace = false;
         insertLayer = '0';
@@ -418,9 +438,9 @@ function scanAttribs(text: string): RawAttrib[] {
           if (c === '8') insertLayer = v;
           if (c === '5') insertHandle = v;
         }
-      } else if (value === 'ATTRIB' && section === 'ENTITIES') {
+      } else if (value === 'ATTRIB' && scanned) {
         const attrib = parseAttrib(lines, i + 2, inPaperSpace, insertLayer);
-        if (attrib) attribs.push({ ...attrib, insertHandle, insertOrdinal });
+        if (attrib) attribs.push({ ...attrib, insertHandle, insertOrdinal, blockName });
       }
     }
   }
@@ -573,16 +593,14 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   // on its INSERT, and drawn as part of it, so clicking a tag selects the door.
   // Without handles (R12), the n-th INSERT of the ENTITIES section owns the
   // attributes that follow it — dxf-parser keeps the file's order.
-  const inserts = (dxf?.entities ?? []).filter((raw) => raw.type === 'INSERT').map((raw) => objectOf.get(raw)!);
-  for (const attrib of scanAttribs(text)) {
-    const owner =
-      attrib.insertHandle !== undefined ? objectByHandle.get(attrib.insertHandle) : inserts[attrib.insertOrdinal];
+  const attribs = scanAttribs(text);
+  const addAttrib = (attrib: RawAttrib, owner: number | undefined, target: DxfEntity[]) => {
     if (owner !== undefined) {
       const attributes = (context.objects[owner].attributes ??= []);
       attributes.push(attrib.hidden ? { tag: attrib.tag, value: attrib.text, hidden: true } : { tag: attrib.tag, value: attrib.text });
     }
     // Hidden or blank attributes are part of the block's data, not its drawing
-    if (attrib.hidden || !attrib.text) continue;
+    if (attrib.hidden || !attrib.text) return;
 
     const color = layerColor(attrib.layer, context) ?? FALLBACK_COLOR;
     const entity: TextEntity = {
@@ -602,8 +620,15 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
       entity.obj = owner;
       context.drawnObjects.add(owner);
     }
-    const target = attrib.inPaperSpace ? paperEntities : modelEntities;
     target.push(entity);
+  };
+
+  const inserts = (dxf?.entities ?? []).filter((raw) => raw.type === 'INSERT').map((raw) => objectOf.get(raw)!);
+  for (const attrib of attribs) {
+    if (attrib.blockName !== undefined) continue;
+    const owner =
+      attrib.insertHandle !== undefined ? objectByHandle.get(attrib.insertHandle) : inserts[attrib.insertOrdinal];
+    addAttrib(attrib, owner, attrib.inPaperSpace ? paperEntities : modelEntities);
   }
 
   const rawModelEntities = (dxf?.entities ?? []).filter((e) => !e.inPaperSpace);
@@ -634,11 +659,24 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   );
   for (const [name, blockName, entities] of extraLayouts(context, alreadyDrawn)) {
     const collected: DxfEntity[] = [];
+    const layoutInserts: number[] = [];
+    const layoutByHandle = new Map<string, number>();
     for (const raw of entities) {
-      context.currentObj = register(raw, `layout:${blockName}`);
+      const index = register(raw, `layout:${blockName}`);
+      if (raw.type === 'INSERT') layoutInserts.push(index);
+      const handle = context.objects[index].handle;
+      if (handle !== undefined) layoutByHandle.set(handle, index);
+      context.currentObj = index;
       collectEntity(raw, context, IDENTITY, null, 0, collected);
     }
     context.currentObj = null;
+    // The sheet's own attributes — a title block's sheet name and number
+    for (const attrib of attribs) {
+      if (attrib.blockName !== blockName) continue;
+      const owner =
+        attrib.insertHandle !== undefined ? layoutByHandle.get(attrib.insertHandle) : layoutInserts[attrib.insertOrdinal];
+      addAttrib(attrib, owner, collected);
+    }
     if (collected.length > 0) {
       pageOfPlace.set(`layout:${blockName}`, pages.length);
       pages.push(buildSheet(name, collected, blockName));
