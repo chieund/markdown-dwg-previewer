@@ -35,6 +35,13 @@ next to the code that parses them.
   so those files skip straight to rendering
 - **Pan and zoom** — scroll to zoom toward the cursor, drag to pan, double-click to fit
 - **Layer control** — show or hide any layer, with an entity count for each
+- **Find (Ctrl+F)** — search text, attributes (part numbers, door tags — hidden ones too), block
+  names, layers and object types across every sheet; jump from hit to hit with Enter
+- **Click to inspect** — click any line of a block to select the whole block and see its layer,
+  position, rotation, scale and attributes
+- **Compare drawings** — *Compare with HEAD* (Git), *Compare with File…* or two selected files:
+  added objects in green, removed in red, changed in yellow over their old shape, with a list of
+  every change to step through (F7)
 - **Multi-sheet drawings** — switch between Model Space and every Paper Space layout
 - **Export to SVG or PNG** — drop a drawing into a document, ticket, or chat
 - **Live reload** — the view refreshes when the file changes on disk, keeping your sheet, layers and zoom

@@ -70,6 +70,75 @@
           "scope": "machine"
         }
       }
+    },
+    "commands": [
+      {
+        "command": "dwgPreviewer.compareWithHead",
+        "title": "Compare with HEAD",
+        "category": "DWG",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "dwgPreviewer.compareWithFile",
+        "title": "Compare with File…",
+        "category": "DWG"
+      },
+      {
+        "command": "dwgPreviewer.compareSelected",
+        "title": "Compare Selected Drawings",
+        "category": "DWG"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "dwgPreviewer.compareWithHead",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.(dwg|dxf)$/i && !listMultiSelection",
+          "group": "3_compare@10"
+        },
+        {
+          "command": "dwgPreviewer.compareWithFile",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.(dwg|dxf)$/i && !listMultiSelection",
+          "group": "3_compare@11"
+        },
+        {
+          "command": "dwgPreviewer.compareSelected",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.(dwg|dxf)$/i && listMultiSelection",
+          "group": "3_compare@12"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "dwgPreviewer.compareWithHead",
+          "when": "activeCustomEditorId == 'dwgPreviewer.dwgView' && resourceScheme == file && gitOpenRepositoryCount != 0",
+          "group": "navigation"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "dwgPreviewer.compareWithHead",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.(dwg|dxf)$/i",
+          "group": "3_compare@10"
+        },
+        {
+          "command": "dwgPreviewer.compareWithFile",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.(dwg|dxf)$/i",
+          "group": "3_compare@11"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "dwgPreviewer.compareWithHead",
+          "when": "scmProvider == git && resourceExtname =~ /^\\.(dwg|dxf)$/i",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "dwgPreviewer.compareSelected",
+          "when": "false"
+        }
+      ]
     }
   },
   "scripts": {

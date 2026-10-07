@@ -121,6 +121,14 @@ export const WEBVIEW_STYLES = `
     .dwg-highlight text { fill: var(--dwg-highlight) !important; stroke: none !important; }
     .dwg-highlight [fill]:not([fill="none"]):not(text) { fill: var(--dwg-highlight-fill) !important; }
 
+    .dwg-diff-title { color: var(--dwg-muted); max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dwg-diff-toggles { display: flex; gap: 10px; }
+    .dwg-diff-toggle { display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+    .dwg-diff-position { min-width: 4.5em; text-align: center; color: var(--dwg-muted); align-self: center; }
+    .dwg-diff-unchanged { opacity: 0.35; }
+    .dwg-diff-changedOld { opacity: 0.6; }
+    .dwg-diff-marker { stroke-width: 1.5px; stroke-dasharray: 5 3; }
+
     .dwg-inspector {
       position: absolute; top: 8px; right: 8px; z-index: 5; width: 280px; max-height: calc(100% - 16px);
       overflow-y: auto; background: var(--dwg-surface); color: var(--dwg-text);

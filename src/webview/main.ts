@@ -5,6 +5,7 @@ import {
   applyViewBox,
   attachPanZoom,
   clientToViewBox,
+  fitBounds,
   getViewBox,
   unitsPerPixel,
   zoomCentre,
@@ -17,7 +18,8 @@ import { pickObject } from './pick';
 import { buildInspector } from './inspector';
 import { SearchControl, buildSearchControl } from './searchPanel';
 import type { SearchHit } from './search';
-import type { ObjectInfo } from '../shared/types';
+import type { DrawingDiff, ObjectInfo } from '../shared/types';
+import { renderDiff } from './diffView';
 
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void };
 
@@ -71,17 +73,6 @@ const CLICK_SLOP_PX = 4;
 /** How far from a thin line a click still picks it. */
 const PICK_RADIUS_PX = 4;
 
-function fitBounds(bounds: Bounds): ViewBox {
-  const width = bounds.maxX - bounds.minX || 1;
-  const height = bounds.maxY - bounds.minY || 1;
-  const padding = Math.max(width, height) * 0.05;
-  return {
-    x: bounds.minX - padding,
-    y: -bounds.maxY - padding,
-    w: width + padding * 2,
-    h: height + padding * 2,
-  };
-}
 
 const EMPTY_VIEW: ViewBox = { x: -50, y: -50, w: 100, h: 100 };
 
@@ -861,6 +852,7 @@ window.addEventListener('message', (event) => {
   const message = event.data as
     | { type: 'DXF_DATA'; pages: DxfPage[]; skippedEntityTypes: string[]; warnings?: string[]; objects?: ObjectInfo[] }
     | { type: 'DXF_ERROR'; message: string }
+    | { type: 'DIFF_DATA'; diff: DrawingDiff }
     | { type: 'DXF_PROGRESS'; stage: string };
 
   if (message.type === 'DXF_DATA') {
@@ -868,6 +860,13 @@ window.addEventListener('message', (event) => {
       renderScene(message.pages, message.skippedEntityTypes, message.warnings, message.objects);
     } catch (err) {
       showError(`Error rendering drawing:\n${describe(err)}`);
+    }
+  } else if (message.type === 'DIFF_DATA') {
+    // The same bundle serves the comparison panel
+    try {
+      renderDiff(root, message.diff);
+    } catch (err) {
+      showError(`Error rendering comparison:\n${describe(err)}`);
     }
   } else if (message.type === 'DXF_ERROR') {
     if (scene) showReloadError(message.message);

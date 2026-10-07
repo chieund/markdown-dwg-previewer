@@ -129,3 +129,18 @@ test('objects that draw nothing are marked, so search can leave them out', () =>
   assert.equal(parsed.objects.find((o) => o.handle === 'L1')?.empty, undefined);
   assert.equal(parsed.objects.find((o) => o.handle === 'L2')?.empty, true);
 });
+
+test('an R12 attribute (no handles anywhere) still belongs to the INSERT before it', () => {
+  const text = dxf(
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'INSERT', '8', 'DOORS', '66', '1', '2', 'NOPE', '10', '0', '20', '0', '30', '0',
+    '0', 'ATTRIB', '8', '0', '10', '0', '20', '0', '30', '0', '40', '1', '1', 'A1', '2', 'TAG', '70', '0',
+    '0', 'SEQEND', '8', '0',
+    '0', 'ENDSEC', '0', 'EOF'
+  );
+  const parsed = parseDxf(text);
+  const insert = parsed.objects.findIndex((o) => o.type === 'INSERT');
+  assert.equal(parsed.objects[insert].handle, undefined, 'dxf-parser\'s made-up handles are not real handles');
+  assert.deepEqual(parsed.objects[insert].attributes, [{ tag: 'TAG', value: 'A1' }]);
+  assert.equal(parsed.pages[0].entities.find((e) => e.type === 'TEXT')?.obj, insert);
+});

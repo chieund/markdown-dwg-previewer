@@ -157,3 +157,40 @@ export interface ParsedDxf {
   /** Problems worth telling the user about, e.g. a drawing cut short at the entity limit. */
   warnings?: string[];
 }
+
+export type ChangeKind = 'added' | 'removed' | 'changed';
+
+export interface DiffChange {
+  kind: ChangeKind;
+  /** e.g. `Changed · TEXT "LIVING ROOM" → "LOUNGE"`. */
+  label: string;
+  /** Covers both the old and the new shape. */
+  bounds: Bounds | null;
+}
+
+/**
+ * One page of a comparison. Entities of added, removed and changed objects
+ * carry `obj` = the index of their entry in `changes`, so the view can
+ * highlight a change; unchanged entities carry none.
+ */
+export interface DiffPage {
+  name: string;
+  bounds: Bounds | null;
+  unchanged: DxfEntity[];
+  added: DxfEntity[];
+  removed: DxfEntity[];
+  changedOld: DxfEntity[];
+  changedNew: DxfEntity[];
+  changes: DiffChange[];
+  /** The newer side's viewports, shown as context; their content is not compared. */
+  viewports?: ViewportView[];
+}
+
+export interface DrawingDiff {
+  oldLabel: string;
+  newLabel: string;
+  pages: DiffPage[];
+  /** False when handles did not line up and objects were matched by their content. */
+  handleMatching: boolean;
+  warnings?: string[];
+}

@@ -131,3 +131,16 @@ export function attachPanZoom(
     svg.removeEventListener('dblclick', onDoubleClick);
   };
 }
+
+/** The view that frames `bounds` with a 5% margin. Y is negated: the scene is drawn through a scale(1,-1) flip. */
+export function fitBounds(bounds: { minX: number; minY: number; maxX: number; maxY: number }): ViewBox {
+  const width = bounds.maxX - bounds.minX || 1;
+  const height = bounds.maxY - bounds.minY || 1;
+  const padding = Math.max(width, height) * 0.05;
+  return {
+    x: bounds.minX - padding,
+    y: -bounds.maxY - padding,
+    w: width + padding * 2,
+    h: height + padding * 2,
+  };
+}

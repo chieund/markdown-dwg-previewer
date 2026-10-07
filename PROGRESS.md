@@ -442,6 +442,14 @@ View conversion logs: **View → Output → select "DWG Previewer"** in the drop
 
 ## 📝 Changelog
 
+### 2026-10-07 · unreleased · Visual diff
+- **Compare drawings**: *DWG: Compare with HEAD* (Explorer, editor title button, Source Control changes), *Compare with File…*, *Compare Selected Drawings* (two files in Explorer)
+- Objects matched by handle (AutoCAD keeps them across saves), so a moved door is "changed", not removed + added; falls back to content signatures when handles were renumbered or are missing
+- View: unchanged faded, removed red, old shape of changed red dashed, new shape yellow, added green; toggles with counts, change list, F7 / Shift+F7, zoom + marker per change
+- HEAD is read through the built-in Git extension API, never by running `git` (a repository's config could run programs)
+- Spec: `docs/superpowers/specs/2026-10-07-visual-diff-design.md`; preview harness `--diff=<older file>[#n]`
+- 157 → 183 unit tests; self-diff of all 17 corpus drawings reports 0 changes
+
 ### 2026-10-07 · unreleased · Find + object inspector
 - **Find (Ctrl+F)** across every page: text, attributes (hidden ones too), block names, layers and entity types, grouped by kind; Enter / Shift+Enter step through results, which switch page, zoom to the hit and highlight it
 - **Click to inspect**: clicking any line of a block selects the whole INSERT; a panel shows type, block, layer, handle, position, rotation, scale and attributes

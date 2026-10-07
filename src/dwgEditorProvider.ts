@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { WEBVIEW_STYLES } from './webview/styles';
+import { webviewHtml } from './webviewHtml';
 import { LruCache, debounce } from './dwg/cache';
 import type { DrawingWorker } from './dwg/workerClient';
 import type { ParsedDxf } from './shared/types';
@@ -83,7 +83,7 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
     webviewPanel: vscode.WebviewPanel
   ): Promise<void> {
     webviewPanel.webview.options = { enableScripts: true };
-    webviewPanel.webview.html = this.getHtml(webviewPanel.webview);
+    webviewPanel.webview.html = webviewHtml(webviewPanel.webview, this.context.extensionUri);
 
     /** Bumped per load; a slower, older load must not overwrite a newer one. */
     let generation = 0;
@@ -163,24 +163,5 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
         `Failed to write file: ${err instanceof Error ? err.message : String(err)}`
       );
     }
-  }
-
-  private getHtml(webview: vscode.Webview): string {
-    const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.context.extensionUri, 'out', 'webview', 'main.js')
-    );
-
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${webview.cspSource}; style-src 'unsafe-inline'; img-src data:;" />
-  <style>${WEBVIEW_STYLES}</style>
-</head>
-<body>
-  <div id="root"></div>
-  <script src="${scriptUri}"></script>
-</body>
-</html>`;
   }
 }

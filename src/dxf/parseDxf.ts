@@ -339,6 +339,8 @@ interface RawAttrib {
   style?: string;
   /** Handle of the INSERT the attribute belongs to. */
   insertHandle?: string;
+  /** Position of that INSERT among the ENTITIES section's INSERTs, for files without handles. */
+  insertOrdinal: number;
   tag: string;
   /** Invisible attribute (flag bit 1): listed in the inspector, never drawn. */
   hidden: boolean;
@@ -367,6 +369,7 @@ function scanAttribs(text: string): RawAttrib[] {
   let inPaperSpace = false;
   let insertLayer = '0';
   let insertHandle: string | undefined;
+  let insertOrdinal = -1;
 
   for (let i = 0; i + 1 < lines.length; i += 2) {
     const code = lines[i].trim();
@@ -382,6 +385,7 @@ function scanAttribs(text: string): RawAttrib[] {
         inPaperSpace = false;
         insertLayer = '0';
         insertHandle = undefined;
+        insertOrdinal++;
         for (let j = i + 2; j + 1 < lines.length && lines[j].trim() !== '0'; j += 2) {
           const c = lines[j].trim();
           const v = lines[j + 1].trim();
@@ -391,7 +395,7 @@ function scanAttribs(text: string): RawAttrib[] {
         }
       } else if (value === 'ATTRIB' && section === 'ENTITIES') {
         const attrib = parseAttrib(lines, i + 2, inPaperSpace, insertLayer);
-        if (attrib) attribs.push({ ...attrib, insertHandle });
+        if (attrib) attribs.push({ ...attrib, insertHandle, insertOrdinal });
       }
     }
   }
@@ -399,7 +403,12 @@ function scanAttribs(text: string): RawAttrib[] {
   return attribs;
 }
 
-function parseAttrib(lines: string[], from: number, inPaperSpace: boolean, insertLayer: string): RawAttrib | null {
+function parseAttrib(
+  lines: string[],
+  from: number,
+  inPaperSpace: boolean,
+  insertLayer: string
+): Omit<RawAttrib, 'insertHandle' | 'insertOrdinal'> | null {
   let layer = '0';
   let x = 0, y = 0;
   let height = 1;
@@ -535,8 +544,12 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   // handler, so they are scanned from the raw file and added as text entities.
   // Their positions are already in world coordinates. Each one is also listed
   // on its INSERT, and drawn as part of it, so clicking a tag selects the door.
+  // Without handles (R12), the n-th INSERT of the ENTITIES section owns the
+  // attributes that follow it — dxf-parser keeps the file's order.
+  const inserts = (dxf?.entities ?? []).filter((raw) => raw.type === 'INSERT').map((raw) => objectOf.get(raw)!);
   for (const attrib of scanAttribs(text)) {
-    const owner = attrib.insertHandle !== undefined ? objectByHandle.get(attrib.insertHandle) : undefined;
+    const owner =
+      attrib.insertHandle !== undefined ? objectByHandle.get(attrib.insertHandle) : inserts[attrib.insertOrdinal];
     if (owner !== undefined) {
       const attributes = (context.objects[owner].attributes ??= []);
       attributes.push(attrib.hidden ? { tag: attrib.tag, value: attrib.text, hidden: true } : { tag: attrib.tag, value: attrib.text });
@@ -627,7 +640,9 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
 /** What the search and the inspector show for one top-level entity. */
 function describeObject(raw: IEntity): ObjectInfo {
   const info: ObjectInfo = { type: raw.type, layer: raw.layer ?? '0', page: 0 };
-  if (raw.handle !== undefined) info.handle = String(raw.handle);
+  // dxf-parser numbers entities that have no handle (R12) itself; only a
+  // string came from the file, and only a real handle may pair objects up.
+  if (typeof raw.handle === 'string') info.handle = raw.handle;
 
   switch (raw.type) {
     case 'INSERT': {
