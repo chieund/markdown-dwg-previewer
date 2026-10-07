@@ -136,6 +136,8 @@ interface ParseContext {
   emitted: number;
   /** Raw entities visited so far, block expansion included; see VISITS_PER_ENTITY. */
   visited: number;
+  /** Above zero while drawing a dimension's block: its lines annotate, they are not linework. */
+  notMeasured: number;
   limitReached: boolean;
 }
 
@@ -559,6 +561,7 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
     drawnObjects: new Set(),
     emitted: 0,
     visited: 0,
+    notMeasured: 0,
     limitReached: false,
   };
 
@@ -569,7 +572,7 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   const objectPlace: string[] = [];
   const objectOf = new Map<IEntity, number>();
   const register = (raw: IEntity, place: string): number => {
-    const index = context.objects.push(describeObject(raw, context.blockNames)) - 1;
+    const index = context.objects.push(describeObject(raw, context)) - 1;
     objectPlace.push(place);
     objectOf.set(raw, index);
     return index;
@@ -719,7 +722,8 @@ function readInsertUnits(dxf: ReturnType<DxfParser['parseSync']>): number | unde
 }
 
 /** What the search and the inspector show for one top-level entity. */
-function describeObject(raw: IEntity, blockNames: Record<string, string>): ObjectInfo {
+function describeObject(raw: IEntity, context: Pick<ParseContext, 'blockNames' | 'blocks'>): ObjectInfo {
+  const { blockNames } = context;
   const info: ObjectInfo = { type: raw.type, layer: raw.layer ?? '0', page: 0 };
   // dxf-parser numbers entities that have no handle (R12) itself; only a
   // string came from the file, and only a real handle may pair objects up.
@@ -750,7 +754,7 @@ function describeObject(raw: IEntity, blockNames: Record<string, string>): Objec
     }
     case 'DIMENSION': {
       const e = raw as IDimensionEntity;
-      info.text = formatDimensionText(e);
+      info.text = dimensionLabel(e, context.blocks);
       break;
     }
   }
@@ -1006,7 +1010,7 @@ function sanitizeBooleanFlags(text: string): string {
  * geometry, at its true scale, and counting it twice would inflate every sheet.
  */
 function recordMeasure(context: ParseContext, measure: Measure): void {
-  if (context.keep !== null || context.currentObj === null) return;
+  if (context.keep !== null || context.currentObj === null || context.notMeasured > 0) return;
   const object = context.objects[context.currentObj];
   if (!object) return;
 
@@ -1045,6 +1049,9 @@ function collectEntity(
 
   if (raw.type === 'INSERT') {
     expandInsert(raw as IInsertEntity, context, transform, { layer, color }, depth, out);
+    return;
+  }
+  if (raw.type === 'DIMENSION' && expandDimension(raw as IDimensionEntity, context, transform, { layer, color }, depth, out)) {
     return;
   }
 
@@ -1143,6 +1150,46 @@ function expandInsert(
       if (context.limitReached) return;
     }
   }
+}
+
+/** Definition points: where a dimension measures from. AutoCAD shows them while editing, never on paper. */
+const DEFPOINTS_LAYER = 'DEFPOINTS';
+
+/**
+ * Draws a dimension from the block AutoCAD wrote for it — `*D<n>`, holding the
+ * dimension and extension lines, arrowheads and text exactly as the dimension
+ * style laid them out, at the size it gave them. Rebuilding that from the
+ * dimension's points would mean reading the DIMSTYLE table, which dxf-parser
+ * does not expose. The block is already in world coordinates.
+ *
+ * Returns false when there is no such block, so the caller falls back to
+ * drawing the measurement alone.
+ */
+function expandDimension(
+  dimension: IDimensionEntity,
+  context: ParseContext,
+  transform: Matrix2D,
+  host: BlockHost,
+  depth: number,
+  out: DxfEntity[]
+): boolean {
+  const block = dimension.block ? context.blocks[dimension.block] : undefined;
+  const drawn = (block?.entities ?? []).filter((child) => (child.layer ?? '').toUpperCase() !== DEFPOINTS_LAYER);
+  if (!block || drawn.length === 0) return false;
+  if (depth >= MAX_BLOCK_DEPTH) return true;
+
+  const base = block.position ?? { x: 0, y: 0 };
+  const placed = multiply(transform, translate(-base.x, -base.y));
+  context.notMeasured++;
+  try {
+    for (const child of drawn) {
+      collectEntity(child, context, placed, host, depth + 1, out);
+      if (context.limitReached) break;
+    }
+  } finally {
+    context.notMeasured--;
+  }
+  return true;
 }
 
 /**
@@ -1416,7 +1463,7 @@ function mapEntity(
       if (!e.position || !e.text) return [];
       const { hAlign, vAlign } = mtextAlignment(e.attachmentPoint);
       const font = resolveTextFont(raw, context);
-      return [buildText(layer, color, e.position, cleanMtext(e.text), e.height || 1, e.rotation || 0, m, hAlign, vAlign, font)];
+      return [buildText(layer, color, e.position, cleanMtext(e.text), e.height || 1, mtextRotation(e), m, hAlign, vAlign, font)];
     }
 
     case 'DIMENSION': {
@@ -1440,6 +1487,19 @@ function mapEntity(
       if (!INTENTIONALLY_NOT_DRAWN.has(raw.type)) context.skippedEntityTypes.add(raw.type);
       return [];
   }
+}
+
+/**
+ * MTEXT's angle in degrees. The direction vector (11/21) is what AutoCAD
+ * writes — a vertical dimension's text is (0, 1) — and wins when present;
+ * otherwise group 50, which for MTEXT is in radians, unlike TEXT's degrees.
+ */
+function mtextRotation(e: IMtextEntity): number {
+  const direction = (e as IMtextEntity & { directionVector?: Point2D }).directionVector;
+  if (direction && Number.isFinite(direction.x) && Number.isFinite(direction.y) && (direction.x || direction.y)) {
+    return (Math.atan2(direction.y, direction.x) * 180) / Math.PI;
+  }
+  return Number.isFinite(e.rotation) ? (e.rotation * 180) / Math.PI : 0;
 }
 
 /**
@@ -1847,6 +1907,21 @@ function decodePercentCodes(raw: string): string {
     .replace(/%%(\d{3})/g, (_match, code: string) => String.fromCharCode(Number(code)))
     .replace(/%%%/g, '%')
     .trim();
+}
+
+/**
+ * A dimension's text as the drawing shows it. The block AutoCAD wrote holds
+ * the formatted text — `3'-6"` for an imperial 42, `5300` with the style's
+ * precision — which the raw measurement cannot reproduce without DIMSTYLE.
+ */
+function dimensionLabel(e: IDimensionEntity, blocks: Record<string, IBlock>): string {
+  const label = (e.block ? blocks[e.block]?.entities : undefined)?.find(
+    (child) => child.type === 'MTEXT' || child.type === 'TEXT'
+  );
+  let text = '';
+  if (label?.type === 'MTEXT') text = cleanMtext((label as IMtextEntity).text ?? '');
+  else if (label) text = decodeTextValue((label as ITextEntity).text ?? '');
+  return text || formatDimensionText(e);
 }
 
 function formatDimensionText(e: IDimensionEntity): string {

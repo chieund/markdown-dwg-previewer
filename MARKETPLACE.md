@@ -116,7 +116,7 @@ AutoCAD. Please report drawings that look wrong.
 | **Fills** | SOLID · HATCH |
 | **Text** | TEXT · MTEXT · ATTRIB — with fonts, alignment and rotation |
 | **Blocks** | INSERT — nested, rotated, mirrored, scaled, and grid arrays (mirrored arcs, circles, polylines, text and hatches too) |
-| **Dimensions** | DIMENSION — measurement label and line |
+| **Dimensions** | DIMENSION — drawn as AutoCAD laid it out: dimension and extension lines, arrowheads, text |
 | **Other** | POINT · 3DFACE · viewports on paper-space sheets |
 
 Layers keep their colors and linetypes from the original drawing; line weights set directly

@@ -2,9 +2,9 @@
 
 **Last updated:** 2026-10-08
 
-**Status:** v1.2.0 packaged (`dwg-previewer-1.2.0.vsix`) on branch `feat/add-new` — quantity takeoff (spec `docs/superpowers/specs/2026-10-07-quantity-takeoff-design.md`) + review fixes. 247 unit tests, typecheck clean. Not yet merged, pushed or published.
+**Status:** v1.2.0 released to `master` (tag `v1.2.0`), not yet on the Marketplace — waiting on `vsce login bumkom`. Since then: dimensions drawn in full (unreleased). 253 unit tests, typecheck clean.
 
-**Opens:** `.dwg` and `.dxf` · **247 unit tests** · **corpus 17/17** (not re-run for this change; entity counts are untouched) · typecheck clean
+**Opens:** `.dwg` and `.dxf` · **253 unit tests** · **corpus 17/17** (not re-run since 1.1.0: dimensions now draw their blocks, so entity counts go *up* — the baseline only flags drops) · 91 sample drawings parse cleanly · typecheck clean
 
 ---
 
@@ -478,7 +478,7 @@ npm install          # Install dependencies
 npm run build        # Build extension + webview
 npm run watch        # Watch mode
 npm run typecheck    # TypeScript check
-npm test             # 247 unit tests (node:test, no external dependencies)
+npm test             # 253 unit tests (node:test, no external dependencies)
 
 # Corpus test — runs the real pipeline over a whole .dwg directory
 npm run test:corpus -- <corpus-dir>          # compare against the baseline
@@ -502,6 +502,13 @@ View conversion logs: **View → Output → select "DWG Previewer"** in the drop
 ---
 
 ## 📝 Changelog
+
+### 2026-10-08 · unreleased · Dimensions drawn in full
+- **DIMENSION** draws the `*D<n>` block AutoCAD wrote for it — dimension and extension lines, arrowheads, text at the dimension style's size — instead of a grey dashed line and a label 2.5 units tall (invisible in a mm drawing). Definition points (layer DEFPOINTS) are skipped; a dimension with no usable block falls back to its value
+- Dimension geometry is annotation: it adds nothing to the Quantities totals
+- Find and the inspector read a dimension as drawn (`3'-6"`, not the raw `42`)
+- **MTEXT** follows its direction vector (11/21), which is how a vertical dimension's text stands upright; group 50 is read as radians, per the DXF reference
+- Checked over 91 sample drawings: all parse, 420 dimensions → 2,421 drawn pieces, no definition points drawn. Not verified: a mirrored dimension (negative extrusion) — none of the samples has one
 
 ### 2026-10-08 · v1.2.0 · Quantity takeoff + project review fixes
 - **Arc length**: an ARC crossing 0° (300° → 30°) measured 270° instead of 90°; `arcSweep` normalises counter-clockwise, with a remainder so a corrupt angle cannot hang `sampleArc` / `sampleEllipse`
