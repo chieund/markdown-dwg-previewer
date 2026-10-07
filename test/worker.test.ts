@@ -14,6 +14,7 @@ const dxfBytes = () =>
 const WORKER = path.join(__dirname, '..', 'src', 'dwg', 'worker.js');
 const CRASHING = path.join(__dirname, 'fixtures', 'crashWorker.js');
 const HANGING = path.join(__dirname, 'fixtures', 'hangWorker.js');
+const AWAITING = path.join(__dirname, 'fixtures', 'awaitingWorker.js');
 
 test('the pipeline parses DXF bytes and reports its stages', async () => {
   const stages: string[] = [];
@@ -64,6 +65,20 @@ test('a job that runs too long fails, and the jobs queued behind it still finish
     const queued = worker.run(dxfBytes(), 'b.dxf', '', () => {});
     await assert.rejects(stuck, /took longer than/);
     assert.deepEqual((await queued).pages, []);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test('a drawing waiting on its converter is not timed out by the one stuck after it', async () => {
+  // The innocent job awaits; without a serial queue the stuck job would start
+  // during that await, block the thread, and the innocent job's clock would run out first.
+  const worker = new DrawingWorker(AWAITING, () => {}, { timeoutMs: 400 });
+  try {
+    const innocent = worker.run(dxfBytes(), 'innocent.dwg', '', () => {});
+    const stuck = worker.run(dxfBytes(), 'hang.dxf', '', () => {});
+    assert.deepEqual((await innocent).pages, []);
+    await assert.rejects(stuck, /took longer than 400 ms/);
   } finally {
     await worker.dispose();
   }

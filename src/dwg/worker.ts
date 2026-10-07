@@ -7,6 +7,7 @@
 import { parentPort } from 'worker_threads';
 import { setConverterLogger } from './converter';
 import { processDrawing } from './pipeline';
+import { serialQueue } from './serial';
 import type { WorkerReply, WorkerRequest } from './workerProtocol';
 
 const port = parentPort;
@@ -16,14 +17,19 @@ const reply = (message: WorkerReply) => port.postMessage(message);
 
 setConverterLogger((msg) => reply({ type: 'log', msg }));
 
-port.on('message', async (request: WorkerRequest) => {
-  const { id } = request;
-  try {
-    const parsed = await processDrawing(request.bytes, request.filePath, request.converterPath, (stage) =>
-      reply({ id, type: 'progress', stage })
-    );
-    reply({ id, type: 'done', parsed });
-  } catch (err) {
-    reply({ id, type: 'error', message: err instanceof Error ? err.message : String(err) });
-  }
-});
+// One drawing at a time: see serialQueue for why.
+const enqueue = serialQueue();
+
+port.on('message', (request: WorkerRequest) =>
+  enqueue(async () => {
+    const { id } = request;
+    try {
+      const parsed = await processDrawing(request.bytes, request.filePath, request.converterPath, (stage) =>
+        reply({ id, type: 'progress', stage })
+      );
+      reply({ id, type: 'done', parsed });
+    } catch (err) {
+      reply({ id, type: 'error', message: err instanceof Error ? err.message : String(err) });
+    }
+  })
+);

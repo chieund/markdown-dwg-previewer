@@ -86,11 +86,13 @@ const CIRCLE_SAMPLE_SEGMENTS = 64;
 export const MAX_ENTITIES = 500_000;
 
 /**
- * Raw entities one parse may visit, as a multiple of the entity limit. Counting
- * only what gets drawn is not enough: a block that inserts itself six times and
- * holds no geometry emits nothing while expanding 6^16 times. Real drawings
- * visit a few times what they draw — viewports re-collect the model, and blocks
- * nest — so the margin is generous.
+ * Raw entities one pass may visit — model space, one layout, or one viewport —
+ * as a multiple of the entity limit. Counting only what gets drawn is not
+ * enough: a block that inserts itself six times and holds no geometry emits
+ * nothing while expanding 6^16 times. The budget is per pass because every
+ * viewport walks the whole model again; one shared count cut short real sheet
+ * sets of many small detail views. A file of endless viewports is still bounded
+ * by the worker's job timeout.
  */
 const VISITS_PER_ENTITY = 20;
 
@@ -134,7 +136,7 @@ interface ParseContext {
   drawnObjects: Set<number>;
   /** Entities produced so far, checked against maxEntities. */
   emitted: number;
-  /** Raw entities visited so far, block expansion included; see VISITS_PER_ENTITY. */
+  /** Raw entities visited in the current pass, block expansion included; see VISITS_PER_ENTITY. */
   visited: number;
   /** Above zero while drawing a dimension's block: its lines annotate, they are not linework. */
   notMeasured: number;
@@ -662,6 +664,7 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   );
   for (const [name, blockName, entities] of extraLayouts(context, alreadyDrawn)) {
     const collected: DxfEntity[] = [];
+    context.visited = 0;
     const layoutInserts: number[] = [];
     const layoutByHandle = new Map<string, number>();
     for (const raw of entities) {
@@ -802,6 +805,7 @@ function buildViewports(
     // once per viewport.
     const transform = viewportTransform(viewport);
     const visible: DxfEntity[] = [];
+    context.visited = 0;
     context.keep = (e) => !frozenLayers.has(e.layer) && overlaps(computeBounds([e]), rect);
     try {
       for (const raw of rawModelEntities) {
@@ -1492,14 +1496,15 @@ function mapEntity(
 /**
  * MTEXT's angle in degrees. The direction vector (11/21) is what AutoCAD
  * writes — a vertical dimension's text is (0, 1) — and wins when present;
- * otherwise group 50, which for MTEXT is in radians, unlike TEXT's degrees.
+ * otherwise group 50. The DXF reference calls that radians, but AutoCAD and
+ * ezdxf write degrees (ezdxf documents the reference as wrong), as TEXT does.
  */
 function mtextRotation(e: IMtextEntity): number {
   const direction = (e as IMtextEntity & { directionVector?: Point2D }).directionVector;
   if (direction && Number.isFinite(direction.x) && Number.isFinite(direction.y) && (direction.x || direction.y)) {
     return (Math.atan2(direction.y, direction.x) * 180) / Math.PI;
   }
-  return Number.isFinite(e.rotation) ? (e.rotation * 180) / Math.PI : 0;
+  return Number.isFinite(e.rotation) ? e.rotation : 0;
 }
 
 /**
@@ -1915,13 +1920,13 @@ function decodePercentCodes(raw: string): string {
  * precision — which the raw measurement cannot reproduce without DIMSTYLE.
  */
 function dimensionLabel(e: IDimensionEntity, blocks: Record<string, IBlock>): string {
-  const label = (e.block ? blocks[e.block]?.entities : undefined)?.find(
-    (child) => child.type === 'MTEXT' || child.type === 'TEXT'
-  );
-  let text = '';
-  if (label?.type === 'MTEXT') text = cleanMtext((label as IMtextEntity).text ?? '');
-  else if (label) text = decodeTextValue((label as ITextEntity).text ?? '');
-  return text || formatDimensionText(e);
+  // Tolerances and alternate units are texts of their own; read them all.
+  const parts = ((e.block ? blocks[e.block]?.entities : undefined) ?? []).map((child) => {
+    if (child.type === 'MTEXT') return cleanMtext((child as IMtextEntity).text ?? '');
+    if (child.type === 'TEXT') return decodeTextValue((child as ITextEntity).text ?? '');
+    return '';
+  });
+  return parts.filter(Boolean).join(' ') || formatDimensionText(e);
 }
 
 function formatDimensionText(e: IDimensionEntity): string {

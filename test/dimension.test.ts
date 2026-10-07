@@ -83,7 +83,7 @@ test('a dimension without its block still shows its value', () => {
   assert.equal(dimension.text, '5300');
 });
 
-test('MTEXT follows its direction vector, and code 50 is radians', () => {
+test('MTEXT follows its direction vector, else group 50 in degrees', () => {
   const mtext = (...extra: string[]) =>
     entitiesOf(
       dxf(
@@ -94,7 +94,10 @@ test('MTEXT follows its direction vector, and code 50 is radians', () => {
     )[0] as TextEntity;
   assert.equal(Math.round(mtext('11', '0', '21', '1', '31', '0').rotation), 90);
   assert.equal(Math.round(mtext('11', '-1', '21', '0', '31', '0').rotation), 180);
-  assert.equal(Math.round(mtext('50', String(Math.PI / 2)).rotation), 90);
+  // The DXF reference says radians; AutoCAD and ezdxf write degrees
+  assert.equal(Math.round(mtext('50', '90').rotation), 90);
+  // The direction vector wins over group 50
+  assert.equal(Math.round(mtext('50', '45', '11', '0', '21', '1', '31', '0').rotation), 90);
   assert.equal(mtext().rotation, 0);
 });
 
@@ -119,4 +122,12 @@ test('a dimension whose block holds only definition points still shows its value
   const [only] = entitiesOf(text);
   assert.ok(only && only.type === 'DIMENSION');
   assert.equal(only.text, '120');
+});
+
+test('a dimension with a tolerance reads as all of its text', () => {
+  // A second MTEXT beside the value, as AutoCAD writes a tolerance
+  const text = verticalDimension().replace(
+    '\\A1;5300\n11\n0\n21\n1\n31\n0\n', '\\A1;5300\n11\n0\n21\n1\n31\n0\n0\nMTEXT\n8\n0\n10\n1100\n20\n2650\n30\n0\n40\n150\n1\n+5\n');
+  const [dimension] = parseDxf(text).objects;
+  assert.equal(dimension.text, '5300 +5');
 });

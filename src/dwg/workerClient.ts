@@ -9,9 +9,12 @@ const WORKER_HEAP_MB = 3072;
 /**
  * How long one drawing may take once the worker has started on it. The largest
  * corpus drawing takes under 7 s; this is for a file that would never finish,
- * which would otherwise hold up every drawing opened after it.
+ * which would otherwise hold up every drawing opened after it. It must outlast
+ * the external converters' own limits (ODA File Converter: 120 s, then
+ * dwg2dxf: 60 s, see converter.ts) plus parsing, or a slow but legitimate
+ * conversion would be cut off and blamed on the drawing.
  */
-const JOB_TIMEOUT_MS = 120_000;
+const JOB_TIMEOUT_MS = 300_000;
 
 interface Job {
   request: WorkerRequest;
@@ -130,10 +133,11 @@ export class DrawingWorker {
     if (!job) return;
     this.finish(id, job);
     this.log(`Drawing worker: ${job.request.filePath} took longer than ${this.timeoutMs} ms; restarting the worker`);
+    const limit = this.timeoutMs >= 1000 ? `${Math.round(this.timeoutMs / 1000)} s` : `${this.timeoutMs} ms`;
     job.reject(
       new Error(
-        `This drawing took longer than ${Math.round(this.timeoutMs / 1000)} s to read, so it was stopped. ` +
-          'It may hold a block that expands without end, or be damaged.'
+        `This drawing took longer than ${limit} to read, so it was stopped. ` +
+          'The file may be damaged, or too complex to preview.'
       )
     );
 

@@ -340,6 +340,30 @@ test('model geometry outside a viewport does not use up the entity budget', () =
   assert.deepEqual(parsed.pages[1].viewports?.[0].entities.map((e) => e.layer), ['TARGET']);
 });
 
+test('a sheet of many detail viewports is not cut short by the work budget', () => {
+  // Each viewport walks the whole model again. The budget is per pass, so 25
+  // viewports onto a 900-line model are 25 small passes, not one runaway one.
+  const lines: string[] = [];
+  for (let i = 0; i < 900; i++) {
+    lines.push('0', 'LINE', '8', 'M', '10', String(i * 10), '20', '0', '30', '0', '11', String(i * 10 + 1), '21', '0', '31', '0');
+  }
+  const viewports: string[] = [];
+  for (let v = 0; v < 25; v++) {
+    viewports.push(
+      '0', 'VIEWPORT', '67', '1', '8', '0', '10', String(50 + v * 30), '20', '50', '30', '0', '40', '20', '41', '20',
+      '68', '1', '69', String(v + 2), '12', String(v * 300 + 5), '22', '0', '45', '10'
+    );
+  }
+  const text = dxf(
+    ...entities(...lines, '0', 'LINE', '67', '1', '8', 'BORDER', '10', '0', '20', '0', '30', '0', '11', '900', '21', '0', '31', '0', ...viewports),
+    '0', 'EOF'
+  );
+
+  const parsed = parseDxf(text, { maxEntities: 1000 });
+  assert.equal(parsed.warnings, undefined);
+  assert.equal(parsed.pages[1].viewports?.length, 25);
+});
+
 test('a block that inserts itself is cut short instead of hanging the parser', () => {
   // Six self-inserts and no geometry: 6^16 expansions emit nothing, so only a
   // budget on the work itself — not on the entities drawn — can stop it.

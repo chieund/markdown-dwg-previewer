@@ -85,7 +85,7 @@
 | Fills | SOLID · HATCH (solid + pattern) |
 | Text | TEXT · MTEXT · ATTRIB |
 | Blocks | INSERT (nested, rotated, mirrored, scaled, grid arrays) |
-| Annotations | DIMENSION (label + line) |
+| Annotations | DIMENSION (its `*D<n>` block: lines, arrowheads, text; label-only fallback) |
 | Other | POINT · 3DFACE (wireframe) |
 
 ### 9. Unit tests (`test/`)
@@ -506,8 +506,13 @@ View conversion logs: **View → Output → select "DWG Previewer"** in the drop
 ### 2026-10-08 · unreleased · Dimensions drawn in full
 - **DIMENSION** draws the `*D<n>` block AutoCAD wrote for it — dimension and extension lines, arrowheads, text at the dimension style's size — instead of a grey dashed line and a label 2.5 units tall (invisible in a mm drawing). Definition points (layer DEFPOINTS) are skipped; a dimension with no usable block falls back to its value
 - Dimension geometry is annotation: it adds nothing to the Quantities totals
+- Find reads every text of a dimension (value and tolerance), not just the first
+- **Code review fixes** (independent reviewer over 769057a..718b4cd):
+  - the visit budget is per pass (model, each layout, each viewport); one shared count cut short sheet sets of many detail viewports
+  - the worker runs jobs one at a time (`src/dwg/serial.ts`); before, a DWG awaiting its converter let the next job start, and a stuck job could time out the innocent one
+  - job timeout 300 s, longer than the external converters' own limits; the message no longer blames a self-inserting block
 - Find and the inspector read a dimension as drawn (`3'-6"`, not the raw `42`)
-- **MTEXT** follows its direction vector (11/21), which is how a vertical dimension's text stands upright; group 50 is read as radians, per the DXF reference
+- **MTEXT** follows its direction vector (11/21), which is how a vertical dimension's text stands upright; otherwise group 50, in degrees (the DXF reference says radians, but AutoCAD and ezdxf write degrees)
 - Checked over 91 sample drawings: all parse, 420 dimensions → 2,421 drawn pieces, no definition points drawn. Not verified: a mirrored dimension (negative extrusion) — none of the samples has one
 
 ### 2026-10-08 · v1.2.0 · Quantity takeoff + project review fixes
