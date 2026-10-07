@@ -139,6 +139,13 @@ the drawing.
 
 ---
 
+## Support the project
+
+The extension is free and stays free. If it saved you an AutoCAD launch or a license, you can
+[buy me a coffee ☕](https://buymeacoffee.com/bumkom) — it keeps the updates coming.
+
+---
+
 *Not affiliated with, endorsed by, or sponsored by Autodesk. AutoCAD, DWG and DXF are
 trademarks of Autodesk, Inc., used here only to describe the file formats this extension
 reads.*
