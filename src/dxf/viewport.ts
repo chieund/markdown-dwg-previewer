@@ -12,8 +12,13 @@ export interface RawViewport {
   blockName: string | null;
   /** Rectangle occupied on the sheet, in paper units. */
   paper: { x: number; y: number; width: number; height: number };
-  /** Model-space point shown at the centre of that rectangle. */
+  /** Centre of the view, relative to `target` (DXF stores it in display coordinates). */
   viewCenter: { x: number; y: number };
+  /**
+   * View target point (17/27). A view panned with the target rather than the
+   * centre shows `target + viewCenter`; ignoring it framed empty model space.
+   */
+  target?: { x: number; y: number };
   /** Height of the model-space window, in drawing units. */
   viewHeight: number;
   /** View twist, in degrees. */
@@ -99,6 +104,7 @@ function parseViewport(lines: string[], from: number, blockName: string | null):
     blockName,
     paper: { x: paperX!, y: paperY!, width: width!, height: height! },
     viewCenter: { x: viewX!, y: viewY! },
+    target: { x: values.get('17') ?? 0, y: values.get('27') ?? 0 },
     viewHeight: viewHeight!,
     twist: values.get('51') ?? 0,
     frozenLayerHandles,
@@ -109,7 +115,7 @@ function parseViewport(lines: string[], from: number, blockName: string | null):
  * Transform taking model-space coordinates into their place on the sheet.
  *
  * The viewport shows a `viewHeight`-tall slice of the model, centred on
- * `viewCenter`, inside a rectangle `paper.height` tall — so the scale is the
+ * `target + viewCenter`, inside a rectangle `paper.height` tall — so the scale is the
  * ratio between the two, and the view centre lands on the rectangle's centre.
  */
 export function viewportTransform(viewport: RawViewport): Matrix2D {
@@ -120,7 +126,10 @@ export function viewportTransform(viewport: RawViewport): Matrix2D {
       scale(factor, factor),
       multiply(
         rotate((-viewport.twist * Math.PI) / 180),
-        translate(-viewport.viewCenter.x, -viewport.viewCenter.y)
+        translate(
+          -(viewport.viewCenter.x + (viewport.target?.x ?? 0)),
+          -(viewport.viewCenter.y + (viewport.target?.y ?? 0))
+        )
       )
     )
   );

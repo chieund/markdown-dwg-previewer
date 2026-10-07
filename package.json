@@ -4,7 +4,7 @@
   "description": "View AutoCAD DWG and DXF drawings inside VS Code — no AutoCAD needed. Open .dwg and .dxf files instantly with pan, zoom, layer control and SVG/PNG export.",
   "version": "1.0.3",
   "publisher": "bumkom",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "icon": "icon.png",
   "keywords": [
     "dwg",
@@ -34,6 +34,15 @@
     "Visualization"
   ],
   "activationEvents": [],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Drawings preview normally. A workspace cannot set dwgPreviewer.converterPath, so it cannot make the extension run a program.",
+      "restrictedConfigurations": [
+        "dwgPreviewer.converterPath"
+      ]
+    }
+  },
   "main": "./out/extension.js",
   "contributes": {
     "customEditors": [
@@ -57,7 +66,8 @@
         "dwgPreviewer.converterPath": {
           "type": "string",
           "default": "",
-          "description": "Path to dwg2dxf or ODAFileConverter executable. Leave empty to use the bundled WASM converter."
+          "description": "Path to dwg2dxf or ODAFileConverter executable. Leave empty to use the bundled WASM converter. Can only be set in user settings — a workspace cannot choose a program for this extension to run.",
+          "scope": "machine"
         }
       }
     }
@@ -74,7 +84,6 @@
     "preview": "node esbuild.js && node esbuild.js --preview && node out-test/preview.js"
   },
   "dependencies": {
-    "@mlightcad/libdxfrw-web": "0.0.9",
     "@mlightcad/libredwg-web": "^0.7.9"
   },
   "devDependencies": {

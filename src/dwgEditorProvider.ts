@@ -1,21 +1,78 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { convertDwgToDxf } from './dwg/converter';
-import { describeUnreadableFormat, detectDrawingFormat } from './dwg/format';
 import { WEBVIEW_STYLES } from './webview/styles';
-import { parseDxf } from './dxf/parseDxf';
+import { LruCache, debounce } from './dwg/cache';
+import type { DrawingWorker } from './dwg/workerClient';
+import type { ParsedDxf } from './shared/types';
 
-/** Cache parsed results keyed by file path + mtime to avoid re-converting unchanged files. */
+/** Parsed results keyed by file path, valid while the file's mtime is unchanged. */
 interface CacheEntry {
   mtime: number;
-  parsed: ReturnType<typeof parseDxf>;
+  parsed: ParsedDxf;
 }
-const parseCache = new Map<string, CacheEntry>();
+
+/** A few recent drawings, so reopening a tab is instant without keeping every drawing ever opened. */
+const parseCache = new LruCache<string, CacheEntry>(4);
+
+/**
+ * Conversions under way, so two panels on one file share the work, each still
+ * hearing about progress. Keyed by path + mtime.
+ */
+const inFlight = new Map<string, { result: Promise<ParsedDxf>; listeners: Set<Progress> }>();
+
+/** CAD software writes a file in several steps; wait for it to settle before re-reading. */
+const RELOAD_DEBOUNCE_MS = 300;
+
+type Progress = (stage: 'reading' | 'converting' | 'parsing') => void;
+
+async function loadDrawing(
+  worker: DrawingWorker,
+  uri: vscode.Uri,
+  mtime: number,
+  progress: Progress
+): Promise<ParsedDxf> {
+  const filePath = uri.fsPath;
+  const cached = parseCache.get(filePath);
+  if (cached && cached.mtime === mtime) return cached.parsed;
+
+  const key = `${filePath}\0${mtime}`;
+  let pending = inFlight.get(key);
+  if (pending) {
+    pending.listeners.add(progress);
+  } else {
+    const listeners = new Set<Progress>([progress]);
+    const result = convertAndParse(worker, uri, (stage) => listeners.forEach((listener) => listener(stage))).then(
+      (parsed) => {
+        parseCache.set(filePath, { mtime, parsed });
+        return parsed;
+      }
+    );
+    result.finally(() => inFlight.delete(key)).catch(() => {});
+    pending = { result, listeners };
+    inFlight.set(key, pending);
+  }
+  try {
+    return await pending.result;
+  } finally {
+    pending.listeners.delete(progress);
+  }
+}
+
+async function convertAndParse(worker: DrawingWorker, uri: vscode.Uri, progress: Progress): Promise<ParsedDxf> {
+  progress('reading');
+  const bytes = await vscode.workspace.fs.readFile(uri);
+  const converterPath = vscode.workspace.getConfiguration('dwgPreviewer').get<string>('converterPath', '');
+  // Conversion and parsing run on a worker thread, off the extension host's.
+  return worker.run(bytes, uri.fsPath, converterPath, progress);
+}
 
 export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
   public static readonly viewType = 'dwgPreviewer.dwgView';
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly worker: DrawingWorker
+  ) {}
 
   openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
     return { uri, dispose: () => {} };
@@ -28,65 +85,46 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
     webviewPanel.webview.options = { enableScripts: true };
     webviewPanel.webview.html = this.getHtml(webviewPanel.webview);
 
+    /** Bumped per load; a slower, older load must not overwrite a newer one. */
+    let generation = 0;
+    let disposed = false;
+
+    const post = (run: number, message: unknown) => {
+      if (!disposed && run === generation) void webviewPanel.webview.postMessage(message);
+    };
+
     const sendContent = async () => {
+      const run = ++generation;
       try {
-        const filePath = document.uri.fsPath;
         const stat = await vscode.workspace.fs.stat(document.uri);
-        const mtime = stat.mtime;
-
-        // Check cache — skip expensive conversion if file hasn't changed
-        const cached = parseCache.get(filePath);
-        if (cached && cached.mtime === mtime) {
-          webviewPanel.webview.postMessage({ type: 'DXF_DATA', ...cached.parsed });
-          return;
-        }
-
-        webviewPanel.webview.postMessage({ type: 'DXF_PROGRESS', stage: 'reading' });
-        const bytes = await vscode.workspace.fs.readFile(document.uri);
-        const buffer = Buffer.from(bytes);
-
-        // DXF is this extension's own intermediate format, so a DXF file skips
-        // conversion entirely and goes straight to the parser.
-        const format = detectDrawingFormat(buffer);
-        let dxfText: string;
-
-        if (format === 'dxf-text') {
-          dxfText = buffer.toString('utf-8');
-        } else if (format === 'dwg') {
-          webviewPanel.webview.postMessage({ type: 'DXF_PROGRESS', stage: 'converting' });
-          const converterPath = vscode.workspace
-            .getConfiguration('dwgPreviewer')
-            .get<string>('converterPath', '');
-
-          dxfText = await convertDwgToDxf(buffer, document.uri.fsPath, converterPath);
-        } else {
-          throw new Error(describeUnreadableFormat(format, path.basename(filePath)));
-        }
-
-        webviewPanel.webview.postMessage({ type: 'DXF_PROGRESS', stage: 'parsing' });
-        const parsed = parseDxf(dxfText);
-
-        // Store in cache
-        parseCache.set(filePath, { mtime, parsed });
-
-        webviewPanel.webview.postMessage({ type: 'DXF_DATA', ...parsed });
+        const parsed = await loadDrawing(this.worker, document.uri, stat.mtime, (stage) =>
+          post(run, { type: 'DXF_PROGRESS', stage })
+        );
+        post(run, { type: 'DXF_DATA', ...parsed });
       } catch (err) {
-        webviewPanel.webview.postMessage({
+        post(run, {
           type: 'DXF_ERROR',
           message: err instanceof Error ? err.message : String(err),
         });
       }
     };
 
-    webviewPanel.webview.onDidReceiveMessage((message) => {
-      if (message?.type === 'READY') {
-        void sendContent();
-      } else if (message?.type === 'EXPORT') {
-        void this.saveExport(document.uri, message.format, message.data);
-      } else if (message?.type === 'EXPORT_FAILED') {
-        void vscode.window.showErrorMessage(`Export failed: ${message.message}`);
-      }
-    });
+    const reload = debounce(() => void sendContent(), RELOAD_DEBOUNCE_MS);
+
+    const subscriptions: vscode.Disposable[] = [];
+    subscriptions.push(
+      webviewPanel.webview.onDidReceiveMessage((message) => {
+        if (message?.type === 'READY') {
+          void sendContent();
+        } else if (message?.type === 'EXPORT') {
+          if ((message.format === 'svg' || message.format === 'png') && typeof message.data === 'string') {
+            void this.saveExport(document.uri, message.format, message.data);
+          }
+        } else if (message?.type === 'EXPORT_FAILED') {
+          void vscode.window.showErrorMessage(`Export failed: ${String(message.message)}`);
+        }
+      })
+    );
 
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(
@@ -94,8 +132,18 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
         path.basename(document.uri.fsPath)
       )
     );
-    watcher.onDidChange(() => void sendContent());
-    webviewPanel.onDidDispose(() => watcher.dispose());
+    subscriptions.push(
+      watcher,
+      watcher.onDidChange(() => reload()),
+      watcher.onDidCreate(() => reload()),
+      watcher.onDidDelete(() => parseCache.delete(document.uri.fsPath))
+    );
+
+    webviewPanel.onDidDispose(() => {
+      disposed = true;
+      reload.cancel();
+      for (const subscription of subscriptions) subscription.dispose();
+    });
   }
 
   private async saveExport(source: vscode.Uri, format: 'svg' | 'png', data: string): Promise<void> {

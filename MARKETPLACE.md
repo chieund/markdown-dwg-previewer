@@ -37,8 +37,8 @@ next to the code that parses them.
 - **Layer control** — show or hide any layer, with an entity count for each
 - **Multi-sheet drawings** — switch between Model Space and every Paper Space layout
 - **Export to SVG or PNG** — drop a drawing into a document, ticket, or chat
-- **Live reload** — the view refreshes the moment the file changes on disk
-- **Fits your theme** — follows your VS Code colors
+- **Live reload** — the view refreshes when the file changes on disk, keeping your sheet, layers and zoom
+- **Dark canvas** — drawings are shown on a dark background, as in AutoCAD
 - **Fast on big drawings** — a 45,000-entity site plan opens in about two seconds, and
   reopening it is instant
 
@@ -82,9 +82,11 @@ This is a 2D viewer. 3D drawings open, but solids are not rendered; 3DFACE geome
 as wireframe.
 
 **A drawing looks incomplete — why?**
-The toolbar shows a banner naming any entity type it couldn't draw, so you always know when
-something is missing rather than quietly getting a partial picture. Please report those
-files — that banner is exactly the list of what to add next.
+The toolbar shows a banner naming entity types it read but couldn't draw. Some types
+(LEADER, MULTILEADER, TABLE, WIPEOUT, 3D solids) are dropped before that point and are not
+listed yet, so a drawing can be missing those without a banner. Objects hidden in the file
+itself — invisible attributes, hidden dynamic-block states — are left out on purpose, as in
+AutoCAD. Please report drawings that look wrong.
 
 ---
 
@@ -95,11 +97,12 @@ files — that banner is exactly the list of what to add next.
 | **Geometry** | LINE · CIRCLE · ARC · POLYLINE · LWPOLYLINE · SPLINE · ELLIPSE |
 | **Fills** | SOLID · HATCH |
 | **Text** | TEXT · MTEXT · ATTRIB — with fonts, alignment and rotation |
-| **Blocks** | INSERT — nested, rotated, mirrored, scaled, and grid arrays |
+| **Blocks** | INSERT — nested, rotated, mirrored, scaled, and grid arrays (mirrored arcs, circles, polylines, text and hatches too) |
 | **Dimensions** | DIMENSION — measurement label and line |
 | **Other** | POINT · 3DFACE · viewports on paper-space sheets |
 
-Layers keep their colors, linetypes and line weights from the original drawing.
+Layers keep their colors and linetypes from the original drawing; line weights set directly
+on an object are kept too. Layers switched off in a DXF start hidden.
 
 ---
 
@@ -121,3 +124,10 @@ the drawing.
 *Not affiliated with, endorsed by, or sponsored by Autodesk. AutoCAD, DWG and DXF are
 trademarks of Autodesk, Inc., used here only to describe the file formats this extension
 reads.*
+
+---
+
+## License
+
+Open source under **GPL-3.0-or-later**. DWG reading is powered by
+[GNU LibreDWG](https://www.gnu.org/software/libredwg/) (via `@mlightcad/libredwg-web`, GPL-3.0).

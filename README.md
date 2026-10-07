@@ -11,7 +11,7 @@ Preview 2D AutoCAD DWG drawings directly in VS Code — opens the drawing as a r
 - **Multi-page** — switch between Model Space and Paper Space sheets
 - **Export** — save the current view as SVG or PNG
 - **Live reload** — drawing updates automatically when the file changes on disk
-- **Dark theme** — matches VS Code's editor theme
+- **Dark canvas** — drawings render on a dark background
 
 ## How It Works
 
@@ -23,7 +23,7 @@ Preview 2D AutoCAD DWG drawings directly in VS Code — opens the drawing as a r
                 └──────────────┘
 ```
 
-1. **DWG → DXF conversion**: A bundled WebAssembly converter (libdxfrw) transforms the binary DWG into DXF text — entirely in-process, no external installation required
+1. **DWG → DXF conversion**: A bundled WebAssembly converter (LibreDWG) transforms the binary DWG into DXF text — entirely in-process, no external installation required
 2. **DXF parsing**: The DXF text is parsed into a structured drawing model (entities, layers, blocks, viewports)
 3. **SVG rendering**: Entities are rendered as SVG elements in a webview panel with full pan/zoom support
 
@@ -100,8 +100,10 @@ Extension Host (Node.js)          │  Webview (Browser)
 ──────────────────────────────    │  ──────────────────────
 extension.ts (activation)         │  main.ts (toolbar, layers, pages)
 dwgEditorProvider.ts (lifecycle)  │  renderer.ts (entity → SVG)
-dwg/converter.ts (DWG→DXF)       │  panZoom.ts (scroll/drag/fit)
-  ├─ WASM (libdxfrw-web)         │  export.ts (SVG/PNG output)
+dwg/workerClient.ts ──► worker    │  panZoom.ts (scroll/drag/fit)
+── worker thread (out/worker.js) ─│
+dwg/converter.ts (DWG→DXF)       │
+  ├─ WASM (libredwg-web)         │  export.ts (SVG/PNG output)
   └─ CLI fallback (dwg2dxf)      │
 dxf/parseDxf.ts (main parser)    │  Communication:
 dxf/hatch.ts (HATCH scanner)     │  Host → Webview: postMessage(DXF_DATA)
@@ -154,9 +156,9 @@ npm run package
 
 ## License
 
-MIT
+GPL-3.0-or-later — see [`LICENSE`](LICENSE).
 
-The bundled converters are licensed separately:
-- `libredwg-web` (primary converter): GPL-3.0 — runs as a separate WASM module,
-  its output (DXF text) is consumed as data.
-- `libdxfrw-web` (fallback converter): GPL-2.0 — same isolation model.
+The extension loads and calls the bundled LibreDWG converter (`@mlightcad/libredwg-web`,
+GPL-3.0) in-process, so the extension as a whole is distributed under the GPL.
+Third-party components and their licenses are listed in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

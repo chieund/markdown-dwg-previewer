@@ -8,8 +8,16 @@ const extensionConfig = {
   outfile: 'out/extension.js',
   platform: 'node',
   format: 'cjs',
-  external: ['vscode', '@mlightcad/libdxfrw-web', '@mlightcad/libredwg-web'],
+  external: ['vscode', '@mlightcad/libredwg-web'],
   sourcemap: true,
+};
+
+// Worker thread that converts and parses drawings. It sits beside
+// out/extension.js so converter.ts resolves the WASM along the same path.
+const workerConfig = {
+  ...extensionConfig,
+  entryPoints: ['src/dwg/worker.ts'],
+  outfile: 'out/worker.js',
 };
 
 const webviewConfig = {
@@ -30,7 +38,7 @@ const corpusConfig = {
   outfile: 'out-test/corpus.js',
   platform: 'node',
   format: 'cjs',
-  external: ['vscode', '@mlightcad/libdxfrw-web', '@mlightcad/libredwg-web'],
+  external: ['vscode', '@mlightcad/libredwg-web'],
   sourcemap: true,
 };
 
@@ -41,7 +49,7 @@ const previewConfig = {
   outfile: 'out-test/preview.js',
   platform: 'node',
   format: 'cjs',
-  external: ['vscode', '@mlightcad/libdxfrw-web', '@mlightcad/libredwg-web'],
+  external: ['vscode', '@mlightcad/libredwg-web'],
   sourcemap: true,
 };
 
@@ -57,10 +65,15 @@ async function run() {
   if (watch) {
     const ctxExtension = await esbuild.context(extensionConfig);
     const ctxWebview = await esbuild.context(webviewConfig);
-    await Promise.all([ctxExtension.watch(), ctxWebview.watch()]);
+    const ctxWorker = await esbuild.context(workerConfig);
+    await Promise.all([ctxExtension.watch(), ctxWebview.watch(), ctxWorker.watch()]);
     console.log('Watching for changes...');
   } else {
-    await Promise.all([esbuild.build(extensionConfig), esbuild.build(webviewConfig)]);
+    await Promise.all([
+      esbuild.build(extensionConfig),
+      esbuild.build(webviewConfig),
+      esbuild.build(workerConfig),
+    ]);
     console.log('Build complete.');
   }
 }
