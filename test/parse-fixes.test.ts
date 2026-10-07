@@ -340,6 +340,26 @@ test('model geometry outside a viewport does not use up the entity budget', () =
   assert.deepEqual(parsed.pages[1].viewports?.[0].entities.map((e) => e.layer), ['TARGET']);
 });
 
+test('a block that inserts itself is cut short instead of hanging the parser', () => {
+  // Six self-inserts and no geometry: 6^16 expansions emit nothing, so only a
+  // budget on the work itself — not on the entities drawn — can stop it.
+  const selfInsert = ['0', 'INSERT', '8', '0', '2', 'A', '10', '0', '20', '0', '30', '0'];
+  const text = dxf(
+    '0', 'SECTION', '2', 'BLOCKS',
+    '0', 'BLOCK', '2', 'A', '70', '0', '10', '0', '20', '0', '30', '0',
+    ...Array.from({ length: 6 }, () => selfInsert).flat(),
+    '0', 'ENDBLK', '0', 'ENDSEC',
+    ...entities(...selfInsert),
+    '0', 'EOF'
+  );
+
+  const started = Date.now();
+  const parsed = parseDxf(text, { maxEntities: 1000 });
+  assert.ok(Date.now() - started < 2000, 'parse should stop early');
+  assert.equal(parsed.warnings?.length, 1);
+  assert.match(parsed.warnings![0], /cut short/);
+});
+
 test('a viewport keeps text whose anchor is outside the window but whose body reaches in', () => {
   const text = dxf(
     ...entities(

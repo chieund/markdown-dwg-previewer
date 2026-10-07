@@ -13,6 +13,7 @@ const dxfBytes = () =>
 
 const WORKER = path.join(__dirname, '..', 'src', 'dwg', 'worker.js');
 const CRASHING = path.join(__dirname, 'fixtures', 'crashWorker.js');
+const HANGING = path.join(__dirname, 'fixtures', 'hangWorker.js');
 
 test('the pipeline parses DXF bytes and reports its stages', async () => {
   const stages: string[] = [];
@@ -51,6 +52,18 @@ test('a worker that dies fails its job and the next job gets a fresh worker', as
   try {
     await assert.rejects(worker.run(dxfBytes(), 'a.dxf', '', () => {}), /stopped/);
     await assert.rejects(worker.run(dxfBytes(), 'a.dxf', '', () => {}), /stopped/);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test('a job that runs too long fails, and the jobs queued behind it still finish', async () => {
+  const worker = new DrawingWorker(HANGING, () => {}, { timeoutMs: 300 });
+  try {
+    const stuck = worker.run(dxfBytes(), 'hang.dxf', '', () => {});
+    const queued = worker.run(dxfBytes(), 'b.dxf', '', () => {});
+    await assert.rejects(stuck, /took longer than/);
+    assert.deepEqual((await queued).pages, []);
   } finally {
     await worker.dispose();
   }

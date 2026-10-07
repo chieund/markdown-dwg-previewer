@@ -86,6 +86,15 @@ const CIRCLE_SAMPLE_SEGMENTS = 64;
 export const MAX_ENTITIES = 500_000;
 
 /**
+ * Raw entities one parse may visit, as a multiple of the entity limit. Counting
+ * only what gets drawn is not enough: a block that inserts itself six times and
+ * holds no geometry emits nothing while expanding 6^16 times. Real drawings
+ * visit a few times what they draw — viewports re-collect the model, and blocks
+ * nest — so the margin is generous.
+ */
+const VISITS_PER_ENTITY = 20;
+
+/**
  * Fallback label height for DIMENSION, in drawing units.
  *
  * The real height lives in the DIMSTYLE table, which dxf-parser does not
@@ -125,6 +134,8 @@ interface ParseContext {
   drawnObjects: Set<number>;
   /** Entities produced so far, checked against maxEntities. */
   emitted: number;
+  /** Raw entities visited so far, block expansion included; see VISITS_PER_ENTITY. */
+  visited: number;
   limitReached: boolean;
 }
 
@@ -527,6 +538,7 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
     currentObj: null,
     drawnObjects: new Set(),
     emitted: 0,
+    visited: 0,
     limitReached: false,
   };
 
@@ -648,7 +660,7 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   if (context.limitReached) {
     result.warnings = [
       `Drawing cut short: it expands to more than ${context.maxEntities.toLocaleString('en-US')} objects (the limit), ` +
-        'usually because of a huge block array.',
+        'usually because of a huge block array or a block that inserts itself.',
     ];
   }
   return result;
@@ -983,6 +995,10 @@ function collectEntity(
   out: DxfEntity[]
 ): void {
   if (context.limitReached) return;
+  if (++context.visited > context.maxEntities * VISITS_PER_ENTITY) {
+    context.limitReached = true;
+    return;
+  }
   // Group 60 = 1 marks an entity invisible; CAD software does not draw it.
   if ((raw as IEntity & { visible?: boolean }).visible === false) return;
 
