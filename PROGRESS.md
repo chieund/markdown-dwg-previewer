@@ -1,10 +1,10 @@
 # DWG Previewer — Development Progress
 
-**Last updated:** 2026-10-07
+**Last updated:** 2026-10-08
 
-**Status:** quantity takeoff implemented (spec `docs/superpowers/specs/2026-10-07-quantity-takeoff-design.md`) — 239 unit tests, typecheck clean. Changes are on `master`, uncommitted.
+**Status:** quantity takeoff implemented (spec `docs/superpowers/specs/2026-10-07-quantity-takeoff-design.md`) — 240 unit tests, typecheck clean. Area unit fix (2026-10-08) on branch `feat/add-new`.
 
-**Opens:** `.dwg` and `.dxf` · **239 unit tests** · **corpus 17/17** (not re-run for this change; entity counts are untouched) · typecheck clean
+**Opens:** `.dwg` and `.dxf` · **240 unit tests** · **corpus 17/17** (not re-run for this change; entity counts are untouched) · typecheck clean
 
 ---
 
@@ -172,7 +172,8 @@ much linework and area per layer, without AutoCAD.
 
 - `src/webview/takeoff.ts` — grouping by block and by layer, hidden layers excluded
 - `src/webview/units.ts` — `$INSUNITS` → output unit; metric opens in m, imperial in ft; a drawing
-  that declares none stays in drawing units and says so
+  that declares none stays in drawing units and says so. `convertLength` scales by the unit factor,
+  `convertArea` by its square
 - `src/webview/table.ts` — TSV for the clipboard, RFC 4180 CSV for the file
 - `src/webview/takeoffPanel.ts` — Blocks / Layers tabs, ⌖ per row, Copy table, Export CSV
 - `main.ts` — *Quantities* button, Shift+click multi-selection, selection totals in the status bar;
@@ -180,6 +181,9 @@ much linework and area per layer, without AutoCAD.
 
 ### Notes for whoever picks this up next
 
+- **Areas convert by the square of the length factor** (fixed 2026-10-08). The first version ran
+  areas through the length conversion, so a 6 000 × 4 000 mm room read 24 000 m² instead of 24 m²,
+  and the end-to-end check below had recorded that wrong number as correct.
 - **Sampled curves are corrected, not measured raw.** An ellipse sampled into 64 chords encloses
   0.16 % *less* than the ellipse, and `sampledMeasure` divides that error back out; without it the
   area of a floor was quietly low.
@@ -190,7 +194,7 @@ much linework and area per layer, without AutoCAD.
   panel shows — but a block drawn partly on hidden inner layers is still counted in full, because
   `ObjectInfo` records one layer per object.
 - Verified end to end on a synthetic drawing (`$INSUNITS = 4`): a 12 600-unit wall reads 12.60 m,
-  a 6 000 × 4 000 hatch reads 24 000.00 m², a door inserted at ×2 reads twice the length of the
+  a 6 000 × 4 000 hatch reads 24.00 m², a door inserted at ×2 reads twice the length of the
   same block at ×1, and hiding the hatch's layer drops it from the totals.
 - `npm run test:corpus` was **not** re-run: the corpus of AutoCAD samples is not on this machine.
   Nothing in the change touches the entity pipeline, so the counts the baseline records are expected
@@ -351,7 +355,7 @@ An independent reviewer then re-reviewed the fixes themselves and caught 2 bugs 
 | 12 | Friendly error state | `showError` wipes the whole toolbar and shows a JavaScript stack trace, no retry button | Medium |
 | 13 | DWG version badge | Show the version (AC1021 = 2007…) on the toolbar | Low |
 | 14 | Thumbnail preview | Thumbnail in the Explorer sidebar — libredwg's `DwgDatabase` already provides `thumbnailImage` | Low |
-| 15 | Search entities | Find entities by layer / type / text content | Low |
+| 15 | ~~Search entities~~ | ✅ Done 2026-10-07 — Find (Ctrl+F) searches text, attributes, block names, layers and entity types | Low |
 | 16 | Measurement tool | Measure the distance between 2 points on the drawing | Low |
 
 ### Major directions worth considering
@@ -474,7 +478,7 @@ npm install          # Install dependencies
 npm run build        # Build extension + webview
 npm run watch        # Watch mode
 npm run typecheck    # TypeScript check
-npm test             # 239 unit tests (node:test, no external dependencies)
+npm test             # 240 unit tests (node:test, no external dependencies)
 
 # Corpus test — runs the real pipeline over a whole .dwg directory
 npm run test:corpus -- <corpus-dir>          # compare against the baseline
@@ -506,7 +510,7 @@ View conversion logs: **View → Output → select "DWG Previewer"** in the drop
 - Units come from `$INSUNITS` — metric drawings open in m, imperial in ft, and a drawing that declares none stays in drawing units instead of guessing
 - Copy table (TSV) pastes as cells in Excel; Export CSV writes UTF-8 with a BOM so accents survive
 - Hatches keep their own area column: the polyline they fill is already counted in "Area"
-- 183 → 239 unit tests
+- 183 → 240 unit tests
 
 ### 2026-10-07 · unreleased · Visual diff
 - **Compare drawings**: *DWG: Compare with HEAD* (Explorer, editor title button, Source Control changes), *Compare with File…*, *Compare Selected Drawings* (two files in Explorer)

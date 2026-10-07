@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { measureSelection, takeOff } from '../src/webview/takeoff';
-import { DRAWING_UNITS, NO_VALUE, convert, defaultUnit, formatArea, formatLength } from '../src/webview/units';
+import { DRAWING_UNITS, NO_VALUE, convertArea, convertLength, defaultUnit, formatArea, formatLength } from '../src/webview/units';
 import { UTF8_BOM, csvField, toCsv, toTsv } from '../src/webview/table';
 import type { ObjectInfo } from '../src/shared/types';
 
@@ -111,16 +111,26 @@ test('a drawing that declares no unit leaves the numbers in drawing units', () =
 test('drawing units are converted through metres', () => {
   const metre = defaultUnit(6);
   const millimetre = defaultUnit(4);
-  assert.equal(convert(1000, 4, metre), 1);
-  assert.equal(convert(1, 6, metre), 1);
+  assert.equal(convertLength(1000, 4, metre), 1);
+  assert.equal(convertLength(1, 6, metre), 1);
   // One drawing unit of an imperial file is an inch; 12 of them are a foot.
   const foot = defaultUnit(1);
-  assert.ok(Math.abs(convert(12, 1, foot) - 1) < 1e-12);
-  assert.ok(Math.abs(convert(1, 4, millimetre!) - 0.001) < 1e-12);
+  assert.ok(Math.abs(convertLength(12, 1, foot) - 1) < 1e-12);
+  assert.ok(Math.abs(convertLength(1, 4, millimetre!) - 0.001) < 1e-12);
+});
+
+test('areas scale by the square of the length factor', () => {
+  const metre = defaultUnit(6);
+  // A 6 000 × 4 000 mm room is 24 m², not 24 000.
+  assert.equal(convertArea(6000 * 4000, 4, metre), 24);
+  assert.equal(convertArea(5, 6, metre), 5);
+  // 144 in² is one square foot.
+  assert.ok(Math.abs(convertArea(144, 1, defaultUnit(1)) - 1) < 1e-12);
+  assert.equal(convertArea(42, 6, undefined), 42);
 });
 
 test('with no chosen unit the numbers stay as the file stores them', () => {
-  assert.equal(convert(42, 6, undefined), 42);
+  assert.equal(convertLength(42, 6, undefined), 42);
   assert.equal(formatLength(42, undefined), `42.00 ${DRAWING_UNITS.label}`);
 });
 

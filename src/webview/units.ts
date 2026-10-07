@@ -70,10 +70,26 @@ export function metresPerDrawingUnit(insunits: number | undefined): number {
   return METRES_PER_UNIT[insunits] ?? 1;
 }
 
-/** Converts a length or area from drawing units into the chosen output unit. */
-export function convert(value: number, insunits: number | undefined, unit: Unit | undefined): number {
-  const metres = metresPerDrawingUnit(insunits);
-  return (value * metres) / (unit?.metres ?? 1);
+/**
+ * How many of the output unit one drawing unit is worth.
+ *
+ * Lengths scale by this once. Areas scale by its square — 1000 mm is 1 m, but
+ * 1 000 000 mm² is 1 m², not 1000 m². Using the length factor for both was
+ * quietly inflating every floor area by the linear scale.
+ */
+function scale(insunits: number | undefined, unit: Unit | undefined): number {
+  return metresPerDrawingUnit(insunits) / (unit?.metres ?? 1);
+}
+
+/** Converts a length from drawing units into the chosen output unit. */
+export function convertLength(value: number, insunits: number | undefined, unit: Unit | undefined): number {
+  return value * scale(insunits, unit);
+}
+
+/** Converts an area from drawing units² into the chosen output unit squared. */
+export function convertArea(value: number, insunits: number | undefined, unit: Unit | undefined): number {
+  const factor = scale(insunits, unit);
+  return value * factor * factor;
 }
 
 /** Shown wherever a column has nothing to report. */

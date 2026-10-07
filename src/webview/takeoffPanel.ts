@@ -7,7 +7,7 @@
  * way. Every row can select its objects, which is what makes the numbers
  * checkable: the estimator can jump to the fourteen doors and count them.
  */
-import { DRAWING_UNITS, NO_VALUE, OUTPUT_UNITS, Unit, convert, formatArea, formatLength } from './units';
+import { DRAWING_UNITS, NO_VALUE, OUTPUT_UNITS, Unit, convertArea, convertLength, formatArea, formatLength } from './units';
 import { toCsv, toTsv } from './table';
 import { EMPTY_TAKEOFF, Takeoff } from './takeoff';
 
@@ -47,8 +47,10 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
   let takeoff: Takeoff = EMPTY_TAKEOFF;
 
   const unitLabel = () => (options.unit() ?? DRAWING_UNITS).label;
-  /** A length or area in drawing units, converted for display and export. */
-  const to = (value: number) => convert(value, options.insunits, options.unit());
+  /** A length in drawing units, converted for display and export. */
+  const toLength = (value: number) => convertLength(value, options.insunits, options.unit());
+  /** An area in drawing units², converted for display and export. */
+  const toArea = (value: number) => convertArea(value, options.insunits, options.unit());
 
   // ── Header ────────────────────────────────────────────────────────────────
 
@@ -137,9 +139,9 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
         cells: [
           row.name,
           String(row.count),
-          formatLength(to(row.length), unit),
-          formatArea(to(row.area), unit),
-          formatArea(to(row.hatchArea), unit),
+          formatLength(toLength(row.length), unit),
+          formatArea(toArea(row.area), unit),
+          formatArea(toArea(row.hatchArea), unit),
         ],
         objects: row.objects,
       })),
@@ -225,8 +227,8 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
 
     const total = document.createElement('div');
     total.className = 'dwg-takeoff-total';
-    const length = to(takeoff.totals.length);
-    const area = to(takeoff.totals.area);
+    const length = toLength(takeoff.totals.length);
+    const area = toArea(takeoff.totals.area);
     total.textContent = [
       `${takeoff.totals.count.toLocaleString()} objects`,
       length > 0 ? `length ${formatLength(length, options.unit())}` : NO_VALUE,
