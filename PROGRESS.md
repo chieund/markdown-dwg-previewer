@@ -2,9 +2,9 @@
 
 **Last updated:** 2026-10-08
 
-**Status:** quantity takeoff implemented (spec `docs/superpowers/specs/2026-10-07-quantity-takeoff-design.md`) — 240 unit tests, typecheck clean. Area unit fix (2026-10-08) on branch `feat/add-new`.
+**Status:** quantity takeoff implemented (spec `docs/superpowers/specs/2026-10-07-quantity-takeoff-design.md`) — 247 unit tests, typecheck clean. Review fixes (2026-10-08) on branch `feat/add-new`, test build `dwg-previewer-1.1.0-test.vsix`.
 
-**Opens:** `.dwg` and `.dxf` · **240 unit tests** · **corpus 17/17** (not re-run for this change; entity counts are untouched) · typecheck clean
+**Opens:** `.dwg` and `.dxf` · **247 unit tests** · **corpus 17/17** (not re-run for this change; entity counts are untouched) · typecheck clean
 
 ---
 
@@ -478,7 +478,7 @@ npm install          # Install dependencies
 npm run build        # Build extension + webview
 npm run watch        # Watch mode
 npm run typecheck    # TypeScript check
-npm test             # 240 unit tests (node:test, no external dependencies)
+npm test             # 247 unit tests (node:test, no external dependencies)
 
 # Corpus test — runs the real pipeline over a whole .dwg directory
 npm run test:corpus -- <corpus-dir>          # compare against the baseline
@@ -502,6 +502,15 @@ View conversion logs: **View → Output → select "DWG Previewer"** in the drop
 ---
 
 ## 📝 Changelog
+
+### 2026-10-08 · unreleased · Project review fixes
+- **Arc length**: an ARC crossing 0° (300° → 30°) measured 270° instead of 90°; `arcSweep` normalises counter-clockwise, with a remainder so a corrupt angle cannot hang `sampleArc` / `sampleEllipse`
+- **Areas** convert by the square of the unit factor (24 000 m² → 24 m² for a 6 × 4 m room)
+- **Self-inserting block**: a 300-byte DXF expanded 6^16 times and hung the worker. The parser now budgets visited entities (20× the entity limit), and `DrawingWorker` fails a job after 2 minutes, restarts the worker and resends the jobs queued behind it
+- **Title blocks on layouts 2+** keep their ATTRIBs (sheet name, drawing number), drawn and searchable. Attributes of INSERTs nested inside ordinary blocks are still not drawn
+- **Unitless drawings**: the quantities panel asks "1 unit = mm/cm/m/in/ft" instead of treating a drawing unit as a metre; the choice survives a reload
+- **CI**: `.github/workflows/ci.yml` — typecheck, unit tests and `vsce package` on every push to master and every PR
+- 240 → 247 unit tests. `npm run test:corpus` still not re-run — the corpus is not on this machine
 
 ### 2026-10-07 · unreleased · Quantity takeoff
 - **Quantities panel**: *Quantities* counts every block under its real name (`Door-900`, not `*B24`) and measures each layer's objects, length, area and hatch area

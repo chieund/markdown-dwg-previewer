@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # The extension host of VS Code 1.85+ runs Node 18–20; test on the oldest it ships today
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # Packaging runs the build and catches a broken manifest or .vscodeignore
+      - run: npx vsce package --readme-path MARKETPLACE.md --out dwg-previewer.vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: dwg-previewer.vsix
