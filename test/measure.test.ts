@@ -411,3 +411,26 @@ test('an INSERT of an ordinary block keeps its own name', () => {
 test('a representation tag pointing at nothing leaves the name alone', () => {
   assert.deepEqual(scanBlockNames(withBlockRecords('ZZ')), {});
 });
+test('geometry inside a block on another layer is recorded against that layer too', () => {
+  const text = withLayers(
+    [layer('0', 7), layer('DOORS', 1), layer('SWING', 2)],
+    ...blocksSection(
+      block(
+        'DOOR',
+        ...lwpolyline([{ x: 0, y: 0 }, { x: 1, y: 0 }]),
+        ...lwpolyline([{ x: 0, y: 0 }, { x: 0, y: 2 }], { layerName: 'SWING' })
+      )
+    ),
+    ...entities(...insert('DOOR', { layerName: 'DOORS' }))
+  );
+  const [door] = modelObjects(text);
+  near(door.length, 3);
+  // Layer-0 geometry is drawn on the INSERT's own layer, so only SWING is a part
+  assert.deepEqual(Object.keys(door.parts ?? {}), ['SWING']);
+  near(door.parts?.SWING.length, 2);
+});
+
+test('an object drawn entirely on its own layer records no parts', () => {
+  const text = withLayers([layer('0', 7)], ...entities(...lwpolyline([{ x: 0, y: 0 }, { x: 1, y: 0 }])));
+  assert.equal(modelObjects(text)[0].parts, undefined);
+});

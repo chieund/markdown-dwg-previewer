@@ -524,7 +524,7 @@ function updateStatusBar(): void {
   // What the current selection measures, so a number on screen can always be
   // traced back to the objects it came from.
   if (selection.length > 0) {
-    const totals = measureSelection(objects, selection);
+    const totals = measureSelection(objects, selection, scene?.hiddenLayers);
     const unit = outputUnit;
     const insunits = drawingUnits();
     const parts = [`${selection.length} selected`];

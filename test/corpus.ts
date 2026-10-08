@@ -2,13 +2,18 @@
  * Corpus test — runs the real pipeline (DWG → DXF → parse) over a whole folder of
  * drawings and reports the result for each file.
  *
- *   npm run test:corpus -- /path/to/folder
+ *   npm run test:corpus -- /path/to/folder [more folders or files…]
  *   npm run test:corpus -- /path/to/folder --save
+ *   npm run test:corpus -- /private/drawings --baseline=/private/drawings/baseline.json
  *
  * The first run uses --save to record a baseline (test/corpus-baseline.json). Later
- * runs without the flag compare against it and flag any file that lost entities
- * or went from working to failing — the safety net for refactoring
- * parser.
+ * runs without the flag compare against it and flag any file that lost entities,
+ * went from working to failing, or whose pages now span a different area — the
+ * safety net for refactoring the parser.
+ *
+ * test/corpus-baseline.json is public, and lists file names. Drawings that may not
+ * be named in public (a client's project) keep their baseline elsewhere through
+ * --baseline.
  *
  * Bundled into out-test/ so __dirname sits one level below the project root, just
  * like out/extension.js at runtime — so the converter finds the WASM along the
@@ -35,13 +40,26 @@ interface FileResult {
   /** Model geometry drawn through paper-space viewports; a broken viewport shows up only here. */
   viewportEntities?: number;
   layers?: number;
+  /**
+   * Each page's bounds, rounded. A misplaced block keeps the entity count but
+   * moves the extents — a mirrored INSERT drawn on the wrong side showed up only
+   * as geometry outside the drawing frame.
+   */
+  extents?: string[];
   blocks?: number;
   skipped?: string[];
 }
 
-const BASELINE = path.resolve(__dirname, '..', 'test', 'corpus-baseline.json');
+const DEFAULT_BASELINE = path.resolve(__dirname, '..', 'test', 'corpus-baseline.json');
+
+/** Bounds to 4 significant digits: float noise is not a change, a block on the wrong side is. */
+function extentsOf(bounds: { minX: number; minY: number; maxX: number; maxY: number } | null): string {
+  if (!bounds) return 'empty';
+  return [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY].map((v) => Number(v.toPrecision(4))).join(' ');
+}
 
 function findDrawings(dir: string): string[] {
+  if (!fs.statSync(dir).isDirectory()) return /\.(dwg|dxf)$/i.test(dir) ? [dir] : [];
   const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
@@ -85,6 +103,7 @@ async function runFile(filePath: string, logLines: string[]): Promise<FileResult
       0
     );
     result.layers = new Set(parsed.pages.flatMap((p) => p.layers.map((l) => l.name))).size;
+    result.extents = parsed.pages.map((page) => extentsOf(page.bounds));
     result.skipped = parsed.skippedEntityTypes.slice().sort();
     result.ok = true;
   } catch (err) {
@@ -140,13 +159,13 @@ function printSkippedSummary(results: FileResult[]): void {
   }
 }
 
-function compareWithBaseline(results: FileResult[]): number {
-  if (!fs.existsSync(BASELINE)) {
+function compareWithBaseline(results: FileResult[], baselinePath: string): number {
+  if (!fs.existsSync(baselinePath)) {
     console.log('\nNo baseline yet. Run again with --save to record the current results as the baseline.');
     return 0;
   }
 
-  const baseline: FileResult[] = JSON.parse(fs.readFileSync(BASELINE, 'utf-8'));
+  const baseline: FileResult[] = JSON.parse(fs.readFileSync(baselinePath, 'utf-8'));
   const before = new Map(baseline.map((r) => [r.file, r]));
   const regressions: string[] = [];
   const improvements: string[] = [];
@@ -170,6 +189,13 @@ function compareWithBaseline(results: FileResult[]): number {
       const delta = now.viewportEntities! - was.viewportEntities;
       const line = `${now.file}: ${was.viewportEntities} → ${now.viewportEntities} entities in viewports (${delta > 0 ? '+' : ''}${delta})`;
       (delta < 0 ? regressions : improvements).push(line);
+    }
+    // Recorded since 2026-10-08; older baselines have no extents to compare.
+    if (was.ok && now.ok && was.extents && now.extents && was.extents.join('|') !== now.extents.join('|')) {
+      const pages = now.extents
+        .map((extent, i) => (extent !== was.extents![i] ? `page ${i + 1}: ${was.extents![i] ?? 'none'} → ${extent}` : null))
+        .filter(Boolean);
+      regressions.push(`${now.file}: drawing extents moved (${pages.join('; ') || 'page count changed'}) — check it on screen, then --save`);
     }
   }
 
@@ -197,27 +223,39 @@ function compareWithBaseline(results: FileResult[]): number {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const save = args.includes('--save');
-  const dir = args.find((a) => !a.startsWith('--')) ?? process.env.DWG_CORPUS;
+  const baselineArg = args.find((a) => a.startsWith('--baseline='));
+  const baselinePath = baselineArg ? path.resolve(baselineArg.slice('--baseline='.length)) : DEFAULT_BASELINE;
+  const given = args.filter((a) => !a.startsWith('--'));
+  const dirs = given.length > 0 ? given : process.env.DWG_CORPUS ? [process.env.DWG_CORPUS] : [];
 
-  if (!dir) {
-    console.error('Missing folder.\n  npm run test:corpus -- /path/to/folder [--save]');
+  if (dirs.length === 0) {
+    console.error('Missing folder.\n  npm run test:corpus -- /path/to/folder [more…] [--save] [--baseline=file.json]');
     process.exit(2);
   }
-  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
-    console.error(`Not a folder: ${dir}`);
-    process.exit(2);
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) {
+      console.error(`Not found: ${dir}`);
+      process.exit(2);
+    }
   }
 
-  const files = findDrawings(dir);
+  const files = dirs.flatMap(findDrawings);
   if (files.length === 0) {
-    console.error(`No .dwg / .dxf files found in ${dir}`);
+    console.error(`No .dwg / .dxf files found in ${dirs.join(', ')}`);
+    process.exit(2);
+  }
+  // Results are matched to the baseline by file name
+  const names = files.map((file) => path.basename(file));
+  const twice = names.filter((name, i) => names.indexOf(name) !== i);
+  if (twice.length > 0) {
+    console.error(`Two drawings share a name, which the baseline cannot tell apart: ${[...new Set(twice)].join(', ')}`);
     process.exit(2);
   }
 
   const logLines: string[] = [];
   setConverterLogger((msg) => logLines.push(msg));
 
-  console.log(`Running ${files.length} drawings from ${dir}`);
+  console.log(`Running ${files.length} drawings from ${dirs.join(', ')}`);
 
   const results: FileResult[] = [];
   for (const file of files) {
@@ -239,12 +277,12 @@ async function main(): Promise<void> {
   );
 
   if (save) {
-    fs.writeFileSync(BASELINE, JSON.stringify(results, null, 2) + '\n');
-    console.log(`Baseline saved: ${path.relative(process.cwd(), BASELINE)}`);
+    fs.writeFileSync(baselinePath, JSON.stringify(results, null, 2) + '\n');
+    console.log(`Baseline saved: ${path.relative(process.cwd(), baselinePath)}`);
     process.exit(failed > 0 ? 1 : 0);
   }
 
-  const regressions = compareWithBaseline(results);
+  const regressions = compareWithBaseline(results, baselinePath);
   process.exit(failed > 0 || regressions > 0 ? 1 : 0);
 }
 

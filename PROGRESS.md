@@ -2,9 +2,9 @@
 
 **Last updated:** 2026-10-08
 
-**Status:** v1.2.0 released to `master` (tag `v1.2.0`), not yet on the Marketplace — waiting on `vsce login bumkom`. Since then: dimensions drawn in full (unreleased). 253 unit tests, typecheck clean.
+**Status:** v1.2.0 released to `master` (tag `v1.2.0`), not yet on the Marketplace — waiting on `vsce login bumkom`. Since then (unreleased): dimensions drawn in full; libredwg-web 0.7.14; unsupported entities named; corpus widened to 23 public drawings. 264 unit tests, typecheck clean.
 
-**Opens:** `.dwg` and `.dxf` · **253 unit tests** · **corpus 17/17** (not re-run since 1.1.0: dimensions now draw their blocks, so entity counts go *up* — the baseline only flags drops) · 91 sample drawings parse cleanly · typecheck clean
+**Opens:** `.dwg` and `.dxf` · **264 unit tests** · **corpus 23/23** public + 3/3 private (2026-10-08) · 91 sample drawings parse cleanly · typecheck clean
 
 ---
 
@@ -35,7 +35,7 @@
 - [x] Verified: 17 DXF files generated from the DWG corpus give **exactly matching entity counts**, conversion drops from 14–562ms to 0–13ms
 
 ### 4. DWG → DXF Converter (`src/dwg/converter.ts`)
-- [x] **Primary: `@mlightcad/libredwg-web` v0.7.9 (GNU LibreDWG WASM, 10MB)**
+- [x] **Primary: `@mlightcad/libredwg-web` v0.7.14 (GNU LibreDWG WASM, 10MB)**
   - Uses `dwg_write_dxf()` via the Emscripten virtual filesystem
   - Supports DWG R14 → 2020+
   - 3.6MB file / 45K entities ✅
@@ -191,8 +191,9 @@ much linework and area per layer, without AutoCAD.
   even-odd rule has to run on unsigned areas or a mirrored hatch with a hole comes out as the *sum*
   of both loops.
 - A block's inner geometry on layer 0 is counted on the INSERT's layer, which is what the layer
-  panel shows — but a block drawn partly on hidden inner layers is still counted in full, because
-  `ObjectInfo` records one layer per object.
+  panel shows. Geometry on *other* inner layers is also kept per layer in `ObjectInfo.parts`
+  (2026-10-08), so switching such a layer off takes its share out of the tables and the selection
+  totals. Rows still group by the object's own layer, as AutoCAD's DATAEXTRACTION does.
 - Verified end to end on a synthetic drawing (`$INSUNITS = 4`): a 12 600-unit wall reads 12.60 m,
   a 6 000 × 4 000 hatch reads 24.00 m², a door inserted at ×2 reads twice the length of the
   same block at ×1, and hiding the hatch's layer drops it from the totals.
@@ -337,13 +338,40 @@ An independent reviewer then re-reviewed the fixes themselves and caught 2 bugs 
 
 ---
 
+## 🧪 Corpus widened (2026-10-08)
+
+`npm run test:corpus` now takes several folders or files, records each page's **extents** (bounds to
+4 significant digits), and takes `--baseline=<file>`.
+
+- **Public set, `test/corpus-baseline.json` — 23 drawings:** the 17 AutoCAD samples, Autodesk's
+  *AEC Plan Elev Sample* (142 mirrored entities), the Google-Drive viewer's sample models
+  (Bracket, Canteen, GridElevation, Map_Of_UAE) and a bridge drawing.
+- **Client drawings keep their baseline outside the repo** (`--baseline=` next to the drawings): the
+  file names identify a client's project and the baseline here is public.
+- **Extents catch what counts cannot.** Mutation check — dropping the INSERT extrusion
+  (mirrored blocks back on the wrong side): AEC loses 179 viewport entities, and Canteen and
+  GridElevation report *extents moved*. The 3 client drawings did **not** flag it: their mirrored
+  blocks stay inside the sheet frame. Screenshots remain the check for those.
+
+Findings:
+
+- **libredwg-web 0.7.9 crashed on `Canteen.dwg`** ("memory access out of bounds"); 0.7.14 converts
+  it (GPL-3.0, unchanged API). Upgraded; the 17 original drawings give identical counts.
+- **A WASM crash broke every later conversion** — the trapped instance stayed cached, so in a
+  long-lived worker one bad file made every DWG opened after it fail (GridElevation "failed" only
+  because it ran after Canteen). `converter.ts` now drops the instance after an exception.
+- A first full run showed Canteen / GridElevation parsing in 104 s / 123 s; not reproducible —
+  the machine's load average was 37 at the time. They parse in 1.6 s / 2.4 s.
+
 ## 🔜 Backlog (possible further improvements)
 
 | # | Task | Why | Priority |
 |---|------|--------|----------|
-| 1 | Report the exact entities dropped by dxf-parser | 3D drawings open blank and the banner can't name the entities — see [Corpus finding](#-corpus-finding-3d-drawings-open-blank-with-no-explanation) | **High** |
-| 2 | Finish reviewing fixes from the DXF project | Commits `3eb0b06`, `bd179a3` touch `parseDxf`/`viewport`/`renderer`/`export`, not yet compared | **High** |
-| 3 | Add real architectural drawings to the corpus | The 17 AutoCAD sample files have no mirrored INSERTs, so they couldn't catch the recent bug | **High** |
+| 1 | ~~Report the exact entities dropped by dxf-parser~~ | ✅ Done 2026-10-08 — `scanEntityExtras` records every type the file draws (ENTITIES + layouts); types nothing reads go to `skippedEntityTypes`. The corpus now names 3DSOLID, ACAD_TABLE, PLANESURFACE, LIGHT, MULTILEADER, LEADER, OLE2FRAME, WIPEOUT — the to-do list for new entity support | High |
+| 2 | ~~Finish reviewing fixes from the DXF project~~ | ✅ Done 2026-10-08 — every change in `3eb0b06` / `bd179a3` is already here. Left in both: lineweight BYLAYER (-1) draws at 1px; LAYER group 370 is never read (`resolveLineweight` TODO) | High |
+| 3 | ~~Add real architectural drawings to the corpus~~ | ✅ Done 2026-10-08 — see [Corpus widened](#-corpus-widened-2026-10-08) | High |
+| 3b | Lineweight by layer | Read LAYER group 370 next to `scanLayerLineTypes`, use it for BYLAYER | Medium |
+| 3c | Draw MULTILEADER / LEADER / ACAD_TABLE | The most common unsupported types in real drawings (2D annotation, not 3D) | Medium |
 | 4 | ~~Viewport culling~~ | ✅ Done 2026-10-06 (filter entities by viewport frame) — screen-frustum culling on zoom/pan still not implemented | High |
 | 5 | Canvas 2D renderer | Replace SVG with Canvas for files >20K entities | High |
 | 6 | ~~Web Worker parsing~~ | ✅ Done 2026-10-07 — `src/dwg/worker.ts` | Medium |

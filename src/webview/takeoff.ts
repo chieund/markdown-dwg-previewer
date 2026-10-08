@@ -69,17 +69,18 @@ export function takeOff(objects: ObjectInfo[], page: number, hiddenLayers: Set<s
       hatchArea: 0,
       objects: [],
     };
+    const measure = visibleMeasure(object, hiddenLayers);
     layer.count++;
-    layer.length += object.length ?? 0;
-    layer.area += object.area ?? 0;
-    layer.hatchArea += object.hatchArea ?? 0;
+    layer.length += measure.length;
+    layer.area += measure.area;
+    layer.hatchArea += measure.hatchArea;
     layer.objects.push(index);
     layers.set(object.layer, layer);
 
     totals.count++;
-    totals.length += object.length ?? 0;
-    totals.area += object.area ?? 0;
-    totals.hatchArea += object.hatchArea ?? 0;
+    totals.length += measure.length;
+    totals.area += measure.area;
+    totals.hatchArea += measure.hatchArea;
 
     // Only INSERTs name a block; a wall drawn as a polyline has none.
     if (!object.block) return;
@@ -100,19 +101,38 @@ export function takeOff(objects: ObjectInfo[], page: number, hiddenLayers: Set<s
 /**
  * Totals for whatever is selected on the canvas.
  *
- * Hidden layers and other pages are ignored: the selection can only hold
- * objects the user can see, but a layer switched off afterwards takes its
- * highlight with it, so the numbers follow the screen too.
+ * The selection can only hold objects the user can see; the share of a block
+ * drawn on a layer switched off is left out, as in the tables.
  */
-export function measureSelection(objects: ObjectInfo[], selection: number[]): Totals {
+export function measureSelection(objects: ObjectInfo[], selection: number[], hiddenLayers: Set<string> = NONE): Totals {
   const totals: Totals = { count: 0, length: 0, area: 0, hatchArea: 0 };
   for (const index of selection) {
     const object = objects[index];
     if (!object) continue;
+    const measure = visibleMeasure(object, hiddenLayers);
     totals.count++;
-    totals.length += object.length ?? 0;
-    totals.area += object.area ?? 0;
-    totals.hatchArea += object.hatchArea ?? 0;
+    totals.length += measure.length;
+    totals.area += measure.area;
+    totals.hatchArea += measure.hatchArea;
   }
   return totals;
+}
+
+const NONE = new Set<string>();
+
+/**
+ * What an object measures on screen: its totals, less the share drawn on
+ * layers that are switched off (a block's door swing on its own layer).
+ */
+function visibleMeasure(object: ObjectInfo, hiddenLayers: Set<string>): Omit<Totals, 'count'> {
+  const measure = { length: object.length ?? 0, area: object.area ?? 0, hatchArea: object.hatchArea ?? 0 };
+  for (const [layer, part] of Object.entries(object.parts ?? {})) {
+    if (!hiddenLayers.has(layer)) continue;
+    measure.length -= part.length ?? 0;
+    measure.area -= part.area ?? 0;
+    measure.hatchArea -= part.hatchArea ?? 0;
+  }
+  // Subtracting floats can leave -1e-13 where the whole object is hidden
+  for (const key of ['length', 'area', 'hatchArea'] as const) measure[key] = Math.max(0, measure[key]);
+  return measure;
 }

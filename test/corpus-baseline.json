@@ -4,27 +4,36 @@
     "sizeKB": 185,
     "ok": true,
     "format": "dwg",
-    "convertMs": 200,
+    "convertMs": 188,
     "dxfKB": 932,
-    "parseMs": 163,
+    "parseMs": 165,
     "pages": 2,
-    "entities": 1622,
-    "viewportEntities": 1531,
-    "layers": 43,
-    "skipped": []
+    "entities": 1786,
+    "viewportEntities": 1695,
+    "layers": 42,
+    "extents": [
+      "4.286 13.71 1332 580.4",
+      "-0.2499 -0.7499 35.75 23.25"
+    ],
+    "skipped": [
+      "MULTILEADER"
+    ]
   },
   {
     "file": "architectural_example-imperial.dwg",
     "sizeKB": 145,
     "ok": true,
     "format": "dwg",
-    "convertMs": 53,
+    "convertMs": 46,
     "dxfKB": 690,
-    "parseMs": 25,
+    "parseMs": 26,
     "pages": 1,
     "entities": 76,
     "viewportEntities": 0,
     "layers": 4,
+    "extents": [
+      "0 0 775.1 812.5"
+    ],
     "skipped": []
   },
   {
@@ -32,41 +41,56 @@
     "sizeKB": 222,
     "ok": true,
     "format": "dwg",
-    "convertMs": 78,
+    "convertMs": 90,
     "dxfKB": 1479,
-    "parseMs": 134,
+    "parseMs": 121,
     "pages": 2,
     "entities": 1232,
     "viewportEntities": 1082,
     "layers": 15,
-    "skipped": []
+    "extents": [
+      "-33.98 -143.9 1109 500.1",
+      "0 -4.164e-15 35.8 23"
+    ],
+    "skipped": [
+      "ACAD_TABLE"
+    ]
   },
   {
     "file": "blocks_and_tables_-_metric.dwg",
     "sizeKB": 253,
     "ok": true,
     "format": "dwg",
-    "convertMs": 79,
+    "convertMs": 83,
     "dxfKB": 1713,
-    "parseMs": 122,
+    "parseMs": 135,
     "pages": 2,
     "entities": 1523,
     "viewportEntities": 1376,
     "layers": 15,
-    "skipped": []
+    "extents": [
+      "121.8 162.4 149.7 183.5",
+      "0 -4.164e-15 1148 552"
+    ],
+    "skipped": [
+      "ACAD_TABLE"
+    ]
   },
   {
     "file": "civil_example-imperial.dwg",
     "sizeKB": 166,
     "ok": true,
     "format": "dwg",
-    "convertMs": 32,
+    "convertMs": 36,
     "dxfKB": 729,
-    "parseMs": 26,
+    "parseMs": 21,
     "pages": 1,
     "entities": 33,
     "viewportEntities": 0,
     "layers": 6,
+    "extents": [
+      "0 -3.71 592.5 651.9"
+    ],
     "skipped": []
   },
   {
@@ -74,13 +98,18 @@
     "sizeKB": 1745,
     "ok": true,
     "format": "dwg",
-    "convertMs": 422,
+    "convertMs": 461,
     "dxfKB": 9179,
-    "parseMs": 1749,
+    "parseMs": 1665,
     "pages": 3,
     "entities": 36431,
     "viewportEntities": 33952,
     "layers": 5,
+    "extents": [
+      "-266.2 -170 784.4 213.1",
+      "3.376 1.595 10.68 8.415",
+      "0.06151 0.1597 9.365 7.771"
+    ],
     "skipped": []
   },
   {
@@ -88,13 +117,16 @@
     "sizeKB": 57,
     "ok": true,
     "format": "dwg",
-    "convertMs": 9,
+    "convertMs": 10,
     "dxfKB": 179,
-    "parseMs": 13,
+    "parseMs": 6,
     "pages": 1,
     "entities": 95,
     "viewportEntities": 0,
     "layers": 3,
+    "extents": [
+      "0 0 8 10.5"
+    ],
     "skipped": []
   },
   {
@@ -102,13 +134,16 @@
     "sizeKB": 139,
     "ok": true,
     "format": "dwg",
-    "convertMs": 33,
+    "convertMs": 32,
     "dxfKB": 618,
-    "parseMs": 20,
+    "parseMs": 14,
     "pages": 1,
     "entities": 88,
     "viewportEntities": 0,
     "layers": 3,
+    "extents": [
+      "0 0 93.11 67.57"
+    ],
     "skipped": []
   },
   {
@@ -116,13 +151,22 @@
     "sizeKB": 84,
     "ok": true,
     "format": "dwg",
-    "convertMs": 28,
+    "convertMs": 27,
     "dxfKB": 498,
-    "parseMs": 24,
+    "parseMs": 20,
     "pages": 7,
     "entities": 328,
     "viewportEntities": 1538,
     "layers": 3,
+    "extents": [
+      "1.18 -11.88 330.3 112.2",
+      "3.297 6.644 7.137 7.144",
+      "3.657 6.644 6.777 7.144",
+      "3.417 6.644 7.017 7.144",
+      "3.417 6.644 7.017 7.144",
+      "4.017 6.644 6.417 7.144",
+      "3.417 6.644 7.017 7.144"
+    ],
     "skipped": []
   },
   {
@@ -130,27 +174,35 @@
     "sizeKB": 428,
     "ok": true,
     "format": "dwg",
-    "convertMs": 119,
+    "convertMs": 121,
     "dxfKB": 2785,
-    "parseMs": 186,
+    "parseMs": 154,
     "pages": 1,
     "entities": 5199,
     "viewportEntities": 0,
     "layers": 4,
-    "skipped": []
+    "extents": [
+      "1.716 1.067 12.77 13.13"
+    ],
+    "skipped": [
+      "OLE2FRAME"
+    ]
   },
   {
     "file": "title_block-arch.dwg",
     "sizeKB": 124,
     "ok": true,
     "format": "dwg",
-    "convertMs": 25,
+    "convertMs": 27,
     "dxfKB": 529,
     "parseMs": 18,
     "pages": 1,
     "entities": 29,
     "viewportEntities": 0,
     "layers": 1,
+    "extents": [
+      "0 0 36 24"
+    ],
     "skipped": []
   },
   {
@@ -158,13 +210,16 @@
     "sizeKB": 125,
     "ok": true,
     "format": "dwg",
-    "convertMs": 24,
+    "convertMs": 26,
     "dxfKB": 540,
-    "parseMs": 17,
+    "parseMs": 16,
     "pages": 1,
     "entities": 29,
     "viewportEntities": 0,
     "layers": 1,
+    "extents": [
+      "0 0 841 594"
+    ],
     "skipped": []
   },
   {
@@ -172,13 +227,16 @@
     "sizeKB": 69,
     "ok": true,
     "format": "dwg",
-    "convertMs": 11,
+    "convertMs": 13,
     "dxfKB": 233,
     "parseMs": 5,
     "pages": 1,
     "entities": 53,
     "viewportEntities": 0,
     "layers": 2,
+    "extents": [
+      "0.5 -2.534 31.12 27.77"
+    ],
     "skipped": []
   },
   {
@@ -186,55 +244,188 @@
     "sizeKB": 716,
     "ok": true,
     "format": "dwg",
-    "convertMs": 114,
+    "convertMs": 123,
     "dxfKB": 1973,
-    "parseMs": 23,
+    "parseMs": 21,
     "pages": 1,
     "entities": 0,
     "viewportEntities": 0,
     "layers": 0,
-    "skipped": []
+    "extents": [
+      "empty"
+    ],
+    "skipped": [
+      "3DSOLID",
+      "PLANESURFACE"
+    ]
   },
   {
     "file": "visualization_-_condominium_with_skylight.dwg",
     "sizeKB": 1383,
     "ok": true,
     "format": "dwg",
-    "convertMs": 223,
+    "convertMs": 266,
     "dxfKB": 3660,
-    "parseMs": 84,
+    "parseMs": 75,
     "pages": 1,
     "entities": 6,
     "viewportEntities": 0,
     "layers": 1,
-    "skipped": []
+    "extents": [
+      "-9.003e-13 3676 477.5 3940"
+    ],
+    "skipped": [
+      "3DSOLID",
+      "LIGHT"
+    ]
   },
   {
     "file": "visualization_-_conference_room.dwg",
     "sizeKB": 951,
     "ok": true,
     "format": "dwg",
-    "convertMs": 151,
+    "convertMs": 178,
     "dxfKB": 2544,
     "parseMs": 41,
     "pages": 1,
     "entities": 8,
     "viewportEntities": 0,
     "layers": 1,
-    "skipped": []
+    "extents": [
+      "-34.32 -125.1 337.7 94.06"
+    ],
+    "skipped": [
+      "3DSOLID",
+      "LIGHT",
+      "PLANESURFACE"
+    ]
   },
   {
     "file": "visualization_-_sun_and_sky_demo.dwg",
     "sizeKB": 540,
     "ok": true,
     "format": "dwg",
-    "convertMs": 97,
+    "convertMs": 105,
     "dxfKB": 1682,
-    "parseMs": 29,
+    "parseMs": 27,
     "pages": 1,
     "entities": 0,
     "viewportEntities": 0,
     "layers": 0,
+    "extents": [
+      "empty"
+    ],
+    "skipped": [
+      "3DSOLID"
+    ]
+  },
+  {
+    "file": "AEC Plan Elev Sample.dxf",
+    "sizeKB": 4038,
+    "ok": true,
+    "format": "dxf-text",
+    "convertMs": 9,
+    "dxfKB": 4038,
+    "parseMs": 390,
+    "pages": 3,
+    "entities": 10489,
+    "viewportEntities": 8277,
+    "layers": 13,
+    "extents": [
+      "-2060 -589.7 2145 991.7",
+      "0 7.3e-15 35.6 22.66",
+      "0 7.3e-15 35.6 22.66"
+    ],
+    "skipped": [
+      "LEADER"
+    ]
+  },
+  {
+    "file": "Bracket.dwg",
+    "sizeKB": 68,
+    "ok": true,
+    "format": "dwg",
+    "convertMs": 12,
+    "dxfKB": 215,
+    "parseMs": 15,
+    "pages": 1,
+    "entities": 300,
+    "viewportEntities": 0,
+    "layers": 7,
+    "extents": [
+      "0.5 0.25 21.5 16.75"
+    ],
+    "skipped": []
+  },
+  {
+    "file": "Canteen.dwg",
+    "sizeKB": 2861,
+    "ok": true,
+    "format": "dwg",
+    "convertMs": 481,
+    "dxfKB": 9716,
+    "parseMs": 1634,
+    "pages": 1,
+    "entities": 42118,
+    "viewportEntities": 0,
+    "layers": 12,
+    "extents": [
+      "-3424 -2737 93480 52380"
+    ],
+    "skipped": [
+      "3DSOLID",
+      "WIPEOUT"
+    ]
+  },
+  {
+    "file": "GridElevation.dwg",
+    "sizeKB": 1731,
+    "ok": true,
+    "format": "dwg",
+    "convertMs": 849,
+    "dxfKB": 14269,
+    "parseMs": 2614,
+    "pages": 1,
+    "entities": 244682,
+    "viewportEntities": 0,
+    "layers": 45,
+    "extents": [
+      "0 0 235300 139700"
+    ],
+    "skipped": []
+  },
+  {
+    "file": "Map_Of_UAE.dxf",
+    "sizeKB": 488,
+    "ok": true,
+    "format": "dxf-text",
+    "convertMs": 0,
+    "dxfKB": 488,
+    "parseMs": 41,
+    "pages": 1,
+    "entities": 155,
+    "viewportEntities": 0,
+    "layers": 3,
+    "extents": [
+      "-191700 -227300 274500 216600"
+    ],
+    "skipped": []
+  },
+  {
+    "file": "2.dxf",
+    "sizeKB": 1444,
+    "ok": true,
+    "format": "dxf-text",
+    "convertMs": 0,
+    "dxfKB": 1444,
+    "parseMs": 121,
+    "pages": 1,
+    "entities": 693,
+    "viewportEntities": 0,
+    "layers": 1,
+    "extents": [
+      "34.82 43.88 303.4 239.9"
+    ],
     "skipped": []
   }
 ]

@@ -72,6 +72,18 @@ const FALLBACK_COLOR = '#d4d4d4';
  */
 const INTENTIONALLY_NOT_DRAWN = new Set(['ATTDEF', 'ATTRIB', 'SEQEND', 'VERTEX']);
 
+/**
+ * Entity types something reads: dxf-parser's handlers, plus the ones our own
+ * scanners pick up from the raw text. dxf-parser drops every other type before
+ * mapEntity sees it, so without this list a drawing of 3D solids opened blank
+ * with nothing named in the banner.
+ */
+const READ_TYPES = new Set([
+  '3DFACE', 'ARC', 'ATTDEF', 'CIRCLE', 'DIMENSION', 'ELLIPSE', 'INSERT', 'LINE', 'LWPOLYLINE',
+  'MTEXT', 'POINT', 'POLYLINE', 'SOLID', 'SPLINE', 'TEXT',
+  'HATCH', 'ATTRIB', 'VIEWPORT', 'VERTEX', 'SEQEND',
+]);
+
 /** Blocks can reference other blocks; this bounds the recursion in case a file contains a cycle. */
 const MAX_BLOCK_DEPTH = 16;
 
@@ -694,6 +706,10 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
     if (!context.drawnObjects.has(index)) object.empty = true;
   });
 
+  for (const type of extras.types) {
+    if (!READ_TYPES.has(type)) context.skippedEntityTypes.add(type);
+  }
+
   const result: ParsedDxf = {
     pages,
     objects: context.objects,
@@ -1013,14 +1029,19 @@ function sanitizeBooleanFlags(text: string): string {
  * collected for a viewport is skipped: the model page already measured that
  * geometry, at its true scale, and counting it twice would inflate every sheet.
  */
-function recordMeasure(context: ParseContext, measure: Measure): void {
+function recordMeasure(context: ParseContext, layer: string, measure: Measure): void {
   if (context.keep !== null || context.currentObj === null || context.notMeasured > 0) return;
   const object = context.objects[context.currentObj];
   if (!object) return;
 
+  // Geometry on another layer than the object's (a block's inner layers) is
+  // also kept per layer, so hiding that layer can take it out of a takeoff.
   const add = (field: 'length' | 'area' | 'hatchArea', value: number | undefined) => {
     if (value === undefined || !Number.isFinite(value) || value <= 0) return;
     object[field] = (object[field] ?? 0) + value;
+    if (layer === object.layer) return;
+    const part = ((object.parts ??= {})[layer] ??= {});
+    part[field] = (part[field] ?? 0) + value;
   };
   add('length', measure.length);
   add('area', measure.area);
@@ -1242,7 +1263,7 @@ function mapEntity(
       const end = applyToPoint(m, e.vertices[1]);
       // A line stays a line under any transform, so the drawn endpoints measure
       // exactly — no need for the block-space formula.
-      recordMeasure(context, { length: Math.hypot(end.x - start.x, end.y - start.y) });
+      recordMeasure(context, layer, { length: Math.hypot(end.x - start.x, end.y - start.y) });
       return [{ type: 'LINE', layer, color, start, end }];
     }
 
@@ -1250,7 +1271,7 @@ function mapEntity(
       const e = raw as ICircleEntity;
       if (isSimilarity(m)) {
         const radius = e.radius * similarityScale(m);
-        recordMeasure(context, circleMeasure(radius));
+        recordMeasure(context, layer, circleMeasure(radius));
         return [
           {
             type: 'CIRCLE',
@@ -1264,7 +1285,7 @@ function mapEntity(
       // Non-uniform scaling turns the circle into an ellipse, which we
       // approximate with a polyline rather than adding an ellipse primitive.
       const points = sampleArc(e.center, e.radius, 0, Math.PI * 2, m);
-      recordMeasure(context, sampledMeasure(points, true));
+      recordMeasure(context, layer, sampledMeasure(points, true));
       return [
         {
           type: 'POLYLINE',
@@ -1283,7 +1304,7 @@ function mapEntity(
       if (isSimilarity(m) && determinant(m) > 0) {
         const angle = rotationAngle(m);
         const radius = e.radius * similarityScale(m);
-        recordMeasure(context, { length: arcLength(radius, e.startAngle, e.endAngle) });
+        recordMeasure(context, layer, { length: arcLength(radius, e.startAngle, e.endAngle) });
         return [
           {
             type: 'ARC',
@@ -1297,7 +1318,7 @@ function mapEntity(
         ];
       }
       const points = sampleArc(e.center, e.radius, e.startAngle, e.endAngle, m);
-      recordMeasure(context, sampledMeasure(points, false));
+      recordMeasure(context, layer, sampledMeasure(points, false));
       return [
         {
           type: 'POLYLINE',
@@ -1315,7 +1336,7 @@ function mapEntity(
       const points = sampleEllipse(e, m);
       if (points.length < 2) return [];
       const closed = isFullSweep(e.startAngle, e.endAngle);
-      recordMeasure(context, sampledMeasure(points, closed));
+      recordMeasure(context, layer, sampledMeasure(points, closed));
       return [
         {
           type: 'POLYLINE',
@@ -1332,7 +1353,7 @@ function mapEntity(
       const corners = solidOutline(e.points ?? []);
       if (corners.length < 3) return [];
       const points = corners.map((p) => applyToPoint(m, p));
-      recordMeasure(context, polygonMeasure(points, true));
+      recordMeasure(context, layer, polygonMeasure(points, true));
       return [
         {
           type: 'POLYLINE',
@@ -1351,7 +1372,7 @@ function mapEntity(
       if (corners.length < 3) return [];
       // Projected flat onto XY — a wireframe outline, not true 3D rendering.
       const points = corners.map((p) => applyToPoint(m, p));
-      recordMeasure(context, polygonMeasure(points, true));
+      recordMeasure(context, layer, polygonMeasure(points, true));
       return [
         {
           type: 'POLYLINE',
@@ -1382,7 +1403,7 @@ function mapEntity(
       if (loops.length === 0) return [];
       // Measured in its own column: the boundary it fills is usually a polyline
       // the area column already counts.
-      recordMeasure(context, { hatchArea: hatchArea(loops) });
+      recordMeasure(context, layer, { hatchArea: hatchArea(loops) });
       return [
         {
           type: 'HATCH',
@@ -1415,6 +1436,7 @@ function mapEntity(
       // a percent.
       recordMeasure(
         context,
+        layer,
         isSimilarity(m) ? scaleMeasure(polylineMeasure(vertices, closed), m) : polygonMeasure(points, closed)
       );
       return [
@@ -1438,7 +1460,7 @@ function mapEntity(
       const points = sampled.length > 0 ? sampled : fitPoints.length > 0 ? fitPoints : controlPoints;
       if (points.length < 2) return [];
       const world = points.map((p) => applyToPoint(m, p));
-      recordMeasure(context, sampledMeasure(world, false));
+      recordMeasure(context, layer, sampledMeasure(world, false));
       return [
         {
           type: 'POLYLINE',

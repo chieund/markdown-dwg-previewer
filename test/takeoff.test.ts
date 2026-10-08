@@ -188,3 +188,31 @@ test('CSV ends every line with CRLF, the way Excel writes files', () => {
 test('the CSV carries a byte-order mark so Excel reads accents', () => {
   assert.equal(UTF8_BOM, '\uFEFF');
 });
+// ── Blocks drawn partly on other layers ──────────────────────────────────
+
+/** A door on DOORS whose swing arc sits on SWING. */
+const door = object({
+  type: 'INSERT',
+  layer: 'DOORS',
+  block: 'Door-900',
+  length: 3,
+  area: 1,
+  parts: { SWING: { length: 2, area: 1 } },
+});
+
+test('the part of a block on a hidden layer is not measured', () => {
+  const { layers, blocks, totals } = takeOff([door], 0, new Set(['SWING']));
+  assert.deepEqual(layers.map((row) => [row.name, row.count, row.length, row.area]), [['DOORS', 1, 1, 0]]);
+  assert.equal(blocks[0].count, 1, 'the door is still on screen, so it is still counted');
+  assert.equal(totals.length, 1);
+});
+
+test('with every layer shown, a block measures in full on its own layer', () => {
+  const { layers } = takeOff([door], 0, none);
+  assert.deepEqual(layers.map((row) => [row.name, row.length, row.area]), [['DOORS', 3, 1]]);
+});
+
+test('a selection leaves out the parts on hidden layers too', () => {
+  assert.equal(measureSelection([door], [0], new Set(['SWING'])).length, 1);
+  assert.equal(measureSelection([door], [0]).length, 3);
+});

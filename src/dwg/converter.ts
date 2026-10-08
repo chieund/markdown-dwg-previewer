@@ -97,6 +97,10 @@ async function convertWithLibredwg(dwgBuffer: Buffer): Promise<string | null> {
     return dxfContent;
   } catch (err) {
     log(`libredwg conversion error: ${describeError(err)}`);
+    // A trap ("memory access out of bounds") leaves the instance's heap in
+    // whatever state the crash left it: every later drawing then fails too,
+    // even ones that convert fine on their own. Start the next one afresh.
+    libredwgModule = null;
     return null;
   } finally {
     try { libredwg.FS.unlink('/input.dwg'); } catch { /* ignore */ }

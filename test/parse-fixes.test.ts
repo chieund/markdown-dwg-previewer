@@ -421,3 +421,52 @@ test('many hatches are put back in file order without quadratic slowdown', () =>
   assert.deepEqual(types, ['LINE', 'HATCH', 'LINE', 'LINE']);
   assert.ok(elapsed < 6000, `took ${elapsed} ms`);
 });
+
+// ── Entities dxf-parser drops ─────────────────────────────────────────────
+
+test('3D entities dxf-parser cannot read are named, not silently dropped', () => {
+  const text = dxf(
+    ...entities(
+      '0', '3DSOLID', '5', 'A1', '8', '0', '1', 'opaque ACIS data',
+      '0', '3DSOLID', '5', 'A2', '8', '0',
+      '0', 'PLANESURFACE', '5', 'A3', '8', '0',
+      '0', 'LINE', '5', 'A4', '8', '0', '10', '0', '20', '0', '30', '0', '11', '1', '21', '0', '31', '0'
+    ),
+    '0', 'EOF'
+  );
+
+  assert.deepEqual(parseDxf(text).skippedEntityTypes.sort(), ['3DSOLID', 'PLANESURFACE']);
+});
+
+test('entities read by our own scanners are not reported as unsupported', () => {
+  const text = dxf(
+    ...entities(
+      '0', 'HATCH', '5', 'B1', '8', '0', '2', 'SOLID', '70', '1', '91', '0',
+      '0', 'VIEWPORT', '5', 'B2', '8', '0', '67', '1',
+      '0', 'POLYLINE', '5', 'B3', '8', '0', '66', '1', '70', '0',
+      '0', 'VERTEX', '5', 'B4', '8', '0', '10', '0', '20', '0', '30', '0',
+      '0', 'VERTEX', '5', 'B5', '8', '0', '10', '1', '20', '0', '30', '0',
+      '0', 'SEQEND', '5', 'B6', '8', '0'
+    ),
+    '0', 'EOF'
+  );
+
+  assert.deepEqual(parseDxf(text).skippedEntityTypes, []);
+});
+
+test('an unsupported entity on a layout is named; one inside an unused block definition is not', () => {
+  const text = dxf(
+    '0', 'SECTION', '2', 'BLOCKS',
+    '0', 'BLOCK', '5', 'C0', '2', '*Paper_Space0', '8', '0', '10', '0', '20', '0', '30', '0',
+    '0', 'MULTILEADER', '5', 'C1', '8', '0',
+    '0', 'ENDBLK', '5', 'C2', '8', '0',
+    '0', 'BLOCK', '5', 'C3', '2', 'Library', '8', '0', '10', '0', '20', '0', '30', '0',
+    '0', 'REGION', '5', 'C4', '8', '0',
+    '0', 'ENDBLK', '5', 'C5', '8', '0',
+    '0', 'ENDSEC',
+    ...entities('0', 'LINE', '5', 'C6', '8', '0', '10', '0', '20', '0', '30', '0', '11', '1', '21', '0', '31', '0'),
+    '0', 'EOF'
+  );
+
+  assert.deepEqual(parseDxf(text).skippedEntityTypes, ['MULTILEADER']);
+});

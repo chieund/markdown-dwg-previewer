@@ -156,7 +156,7 @@
     "preview": "node esbuild.js && node esbuild.js --preview && node out-test/preview.js"
   },
   "dependencies": {
-    "@mlightcad/libredwg-web": "^0.7.9"
+    "@mlightcad/libredwg-web": "^0.7.14"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

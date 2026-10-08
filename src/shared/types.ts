@@ -157,8 +157,22 @@ export interface ObjectInfo {
   length?: number;
   area?: number;
   hatchArea?: number;
+  /**
+   * The share of those totals drawn on layers other than `layer`, by layer — a
+   * block whose door swing sits on its own layer. Already included in the
+   * totals; kept so switching that layer off takes its share out of a takeoff.
+   * Left out when everything is on the object's own layer.
+   */
+  parts?: Record<string, LayerMeasure>;
   /** Nothing was drawn for it (invisible, unsupported, or cut off by the entity limit). */
   empty?: true;
+}
+
+/** What one layer's share of an object measures, in drawing units. */
+export interface LayerMeasure {
+  length?: number;
+  area?: number;
+  hatchArea?: number;
 }
 
 export interface ParsedDxf {
