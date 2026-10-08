@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { firstLineOffset, LINE_SPACING } from '../src/webview/renderer';
 import { exportBackground } from '../src/webview/export';
-import { carryOverView, initialHiddenLayers } from '../src/webview/sceneState';
+import { carryOverView, countVisibleObjects, initialHiddenLayers } from '../src/webview/sceneState';
 import type { DxfPage } from '../src/shared/types';
 
 // ── Multi-line text ──────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ const page = (name: string, layers: { name: string; off?: boolean }[]): DxfPage 
   name,
   entities: [],
   bounds: null,
-  layers: layers.map((l) => ({ name: l.name, color: '#fff', entityCount: 1, off: l.off })),
+  layers: layers.map((l) => ({ name: l.name, color: '#fff', objectCount: 1, off: l.off })),
 });
 
 test('layers switched off in the file start hidden', () => {
@@ -71,4 +71,37 @@ test('off layers are still shown when hiding them would leave the first page bla
   // title_block-arch.dwg: the whole title block sits on layer 0, which is off
   const hidden = initialHiddenLayers([page('Model', [{ name: '0', off: true }]), page('Sheet', [{ name: 'X' }])]);
   assert.deepEqual([...hidden], []);
+});
+
+// ── Object counts ────────────────────────────────────────────────────────
+
+const line = (layer: string, obj?: number) => ({
+  type: 'LINE' as const, layer, color: '#fff', start: { x: 0, y: 0 }, end: { x: 1, y: 0 }, ...(obj === undefined ? {} : { obj }),
+});
+
+test('the status bar counts objects, not the pieces they are drawn with', () => {
+  // A door of three lines, a wall of one, and a stray line that belongs to no object
+  const sheet: DxfPage = {
+    name: 'Model',
+    entities: [line('DOORS', 0), line('DOORS', 0), line('SWING', 0), line('WALLS', 1), line('WALLS')],
+    bounds: null,
+    layers: [],
+  };
+  assert.equal(countVisibleObjects(sheet, new Set()), 3);
+  assert.equal(countVisibleObjects(sheet, new Set(['WALLS'])), 1, 'the door is still on screen');
+  assert.equal(countVisibleObjects(sheet, new Set(['DOORS', 'SWING'])), 2);
+});
+
+test('an object seen through two viewports is counted once', () => {
+  const sheet: DxfPage = {
+    name: 'Sheet',
+    entities: [line('TITLE', 5)],
+    bounds: null,
+    layers: [],
+    viewports: [
+      { rect: { x: 0, y: 0, width: 1, height: 1 }, entities: [line('WALLS', 1)] },
+      { rect: { x: 2, y: 0, width: 1, height: 1 }, entities: [line('WALLS', 1)] },
+    ],
+  } as DxfPage;
+  assert.equal(countVisibleObjects(sheet, new Set()), 2);
 });

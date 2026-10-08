@@ -189,3 +189,22 @@ for (const handles of [true, false]) {
     assert.equal(parsed.pages[0].entities.some((e) => e.type === 'TEXT'), false);
   });
 }
+
+test('the layer panel counts objects drawn on each layer, not entities', () => {
+  const text = [
+    '0', 'SECTION', '2', 'BLOCKS',
+    '0', 'BLOCK', '2', 'DOOR', '8', '0', '10', '0', '20', '0', '30', '0',
+    '0', 'LINE', '8', '0', '10', '0', '20', '0', '30', '0', '11', '1', '21', '0', '31', '0',
+    '0', 'LINE', '8', '0', '10', '0', '20', '0', '30', '0', '11', '0', '21', '1', '31', '0',
+    '0', 'LINE', '8', 'SWING', '10', '0', '20', '0', '30', '0', '11', '1', '21', '1', '31', '0',
+    '0', 'ENDBLK',
+    '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'INSERT', '5', 'D1', '8', 'DOORS', '2', 'DOOR', '10', '0', '20', '0', '30', '0',
+    '0', 'INSERT', '5', 'D2', '8', 'DOORS', '2', 'DOOR', '10', '5', '20', '0', '30', '0',
+    '0', 'ENDSEC',
+    '0', 'EOF',
+  ].join('\n');
+  const layers = parseDxf(text).pages[0].layers;
+  assert.deepEqual(layers.map((l) => [l.name, l.objectCount]), [['DOORS', 2], ['SWING', 2]]);
+});

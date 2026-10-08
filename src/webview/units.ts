@@ -119,20 +119,40 @@ export function convertArea(value: number, insunits: number | undefined, unit: U
 /** Shown wherever a column has nothing to report. */
 export const NO_VALUE = '—';
 
-/** `24.60`, or an em dash when there is nothing to show — for a cell whose column names the unit. */
+/**
+ * Two decimals, grouped by thousands. English throughout, like the rest of the
+ * UI, so the decimal point on screen is the one in the exported file.
+ */
+const DECIMALS = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const WHOLE = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+
+const nothing = (value: number | undefined): value is undefined =>
+  value === undefined || !Number.isFinite(value) || value === 0;
+
+/** `12,600.00`, or an em dash when there is nothing to show — for a cell whose column names the unit. */
 export function formatNumber(value: number | undefined): string {
-  if (value === undefined || !Number.isFinite(value) || value === 0) return NO_VALUE;
-  return value.toFixed(2);
+  return nothing(value) ? NO_VALUE : DECIMALS.format(value);
+}
+
+/** `6,793`. */
+export function formatCount(value: number): string {
+  return WHOLE.format(value);
+}
+
+/**
+ * `12600.00` for the clipboard and CSV: no grouping and no unit, or a
+ * spreadsheet reads the cell as text and cannot sum it; empty for nothing.
+ */
+export function exportNumber(value: number | undefined): string {
+  return nothing(value) ? '' : value.toFixed(2);
 }
 
 /** `24.60 m`, or an em dash when there is nothing to show. */
 export function formatLength(value: number | undefined, unit: Unit | undefined): string {
-  if (value === undefined || !Number.isFinite(value) || value === 0) return NO_VALUE;
-  return `${value.toFixed(2)} ${unit?.label ?? DRAWING_UNITS.label}`;
+  return nothing(value) ? NO_VALUE : `${DECIMALS.format(value)} ${unit?.label ?? DRAWING_UNITS.label}`;
 }
 
 /** `41.25 m²`. Areas always carry the squared sign, in whatever unit is chosen. */
 export function formatArea(value: number | undefined, unit: Unit | undefined): string {
-  if (value === undefined || !Number.isFinite(value) || value === 0) return NO_VALUE;
-  return `${value.toFixed(2)} ${unit?.label ?? DRAWING_UNITS.label}²`;
+  return nothing(value) ? NO_VALUE : `${DECIMALS.format(value)} ${unit?.label ?? DRAWING_UNITS.label}²`;
 }

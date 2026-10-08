@@ -8,8 +8,9 @@
  * number, which is useless for a takeoff and unstable for a diff: renumbering
  * them after an edit turns every door into "removed + added".
  *
- * The records live in the OBJECTS section, which dxf-parser does not expose,
- * so they are scanned from the raw text like the other facts it drops.
+ * The records live in the BLOCK_RECORD table of the TABLES section, which
+ * dxf-parser does not read, so they are scanned from the raw text like the
+ * other facts it drops.
  */
 
 /** Xdata app name AutoCAD writes the representation handle under. */
@@ -71,9 +72,9 @@ export function scanBlockNames(text: string): Record<string, string> {
         continue;
       }
       if (inBlockRecords) finish();
-      // Only the BLOCK_RECORD table is of interest; the other OBJECTS tables
-      // hold handles and names of a completely different kind.
-      inBlockRecords = section === 'OBJECTS' && value === 'BLOCK_RECORD';
+      // Only the BLOCK_RECORD table is of interest; the other tables hold
+      // handles and names of a completely different kind.
+      inBlockRecords = section === 'TABLES' && value === 'BLOCK_RECORD';
       continue;
     }
 

@@ -1,4 +1,4 @@
-import type { DxfPage } from '../shared/types';
+import type { DxfEntity, DxfPage } from '../shared/types';
 
 /**
  * Layers the CAD file itself has switched off; the viewer opens with them hidden.
@@ -42,4 +42,19 @@ export function carryOverView(
   const known = new Set(pages.flatMap((page) => page.layers.map((layer) => layer.name)));
   const hiddenLayers = new Set([...previous.hiddenLayers].filter((name) => known.has(name)));
   return { pageIndex, hiddenLayers, keepView: true };
+}
+
+/**
+ * Objects on screen: what the status bar reports. A door is one object however
+ * many lines draw it, and an object framed by two viewports is still one —
+ * the same unit as the layer panel and Quantities.
+ */
+export function countVisibleObjects(page: DxfPage, hiddenLayers: Set<string>): number {
+  const seen = new Set<number | DxfEntity>();
+  const add = (entities: DxfEntity[]) => {
+    for (const entity of entities) if (!hiddenLayers.has(entity.layer)) seen.add(entity.obj ?? entity);
+  };
+  add(page.entities);
+  for (const view of page.viewports ?? []) add(view.entities);
+  return seen.size;
 }

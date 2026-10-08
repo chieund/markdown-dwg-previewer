@@ -130,12 +130,19 @@ export const WEBVIEW_STYLES = `
     .dwg-diff-marker { stroke-width: 1.5px; stroke-dasharray: 5 3; }
 
     .dwg-inspector {
-      position: absolute; top: 8px; right: 8px; z-index: 5; width: 280px; max-height: calc(100% - 16px);
       overflow-y: auto; background: var(--dwg-surface); color: var(--dwg-text);
-      border: 1px solid var(--dwg-border); border-radius: 3px;
-      box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
       font-family: var(--vscode-font-family, sans-serif); font-size: 12px;
     }
+    /* On its own it floats over the canvas, where opening it moves nothing. */
+    .dwg-canvas > .dwg-inspector {
+      position: absolute; top: 8px; right: 8px; z-index: 5; width: 280px;
+      max-width: calc(100% - 16px); max-height: calc(100% - 16px);
+      border: 1px solid var(--dwg-border); border-radius: 3px;
+      box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
+    }
+    /* With Quantities open, at the top of the sidebar above it. */
+    /* It keeps its height (up to 40%); the Quantities table below gives way and scrolls. */
+    .dwg-sidebar > .dwg-inspector { flex: 0 0 auto; max-height: 40%; border-bottom: 1px solid var(--dwg-divider); }
     .dwg-inspector-header {
       display: flex; align-items: center; gap: 6px; padding: 6px 8px;
       border-bottom: 1px solid var(--dwg-divider);
@@ -154,13 +161,10 @@ export const WEBVIEW_STYLES = `
     .dwg-inspector-table .dwg-layer-swatch { display: inline-block; margin-right: 6px; vertical-align: -1px; }
     .dwg-inspector-hidden td { opacity: 0.6; font-style: italic; }
 
-    /* Quantities panel — where the inspector sits, one of the two at a time. */
+    /* Quantities panel — in the sidebar, under the inspector, taking the rest of its height. */
     .dwg-takeoff {
-      position: absolute; top: 8px; right: 8px; z-index: 5; width: 480px; max-width: calc(100% - 16px);
-      display: flex; flex-direction: column; max-height: calc(100% - 16px);
+      flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
       background: var(--dwg-surface); color: var(--dwg-text);
-      border: 1px solid var(--dwg-border); border-radius: 3px;
-      box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
       font-family: var(--vscode-font-family, sans-serif); font-size: 12px;
     }
     .dwg-takeoff-header {
@@ -211,8 +215,8 @@ export const WEBVIEW_STYLES = `
     }
     .dwg-takeoff-row-active .dwg-takeoff-number { color: var(--dwg-text); }
     .dwg-takeoff-head {
-      min-height: 20px; color: var(--dwg-muted); font-size: 10px; text-transform: uppercase;
-      letter-spacing: 0.04em; border-bottom: 1px solid var(--dwg-divider);
+      /* No text-transform: uppercase would turn "m" (metre) into "M" (mega). */
+      min-height: 20px; color: var(--dwg-muted); font-size: 11px; border-bottom: 1px solid var(--dwg-divider);
     }
     .dwg-takeoff-head .dwg-takeoff-number { font-size: 10px; }
     .dwg-takeoff-locate {
@@ -236,9 +240,6 @@ export const WEBVIEW_STYLES = `
     }
     .dwg-takeoff-action:hover { background: var(--dwg-control-hover); }
     .dwg-takeoff-action:focus-visible { outline: 1px solid var(--dwg-focus); outline-offset: 1px; }
-    /* With the quantities panel open, the inspector moves to its left instead of
-       landing on top of it; on a narrow canvas it keeps to the left edge. */
-    .dwg-with-takeoff .dwg-inspector { right: min(496px, calc(100% - 288px)); }
     .dwg-status-selection { color: var(--dwg-highlight); }
 
     .dwg-banner {
@@ -251,7 +252,19 @@ export const WEBVIEW_STYLES = `
       cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px;
     }
 
-    .dwg-canvas { flex: 1 1 auto; overflow: hidden; background: var(--dwg-canvas); position: relative; }
+    /* Canvas and sidebar side by side; the sidebar takes room only while it holds something. */
+    .dwg-workspace { flex: 1 1 auto; display: flex; min-height: 0; }
+    .dwg-canvas { flex: 1 1 auto; min-width: 0; overflow: hidden; background: var(--dwg-canvas); position: relative; }
+    .dwg-sidebar {
+      flex: 0 0 auto; width: 480px; max-width: 50%; display: flex; flex-direction: column; min-height: 0;
+      background: var(--dwg-surface); border-left: 1px solid var(--dwg-divider);
+    }
+    .dwg-sidebar:empty { display: none; }
+    /* A split editor has no room beside the drawing: the sidebar goes under it. */
+    @media (max-width: 720px) {
+      .dwg-workspace { flex-direction: column; }
+      .dwg-sidebar { width: auto; max-width: none; max-height: 55%; border-left: none; border-top: 1px solid var(--dwg-divider); }
+    }
 
     /* Sits over the canvas when there is nothing to look at, so an empty view
        always explains itself instead of showing a blank rectangle. */

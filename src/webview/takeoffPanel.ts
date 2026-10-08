@@ -2,13 +2,14 @@
  * The Quantities panel: block counts and per-layer length, area and hatch area
  * for the sheet on screen.
  *
- * It sits at the top right; the inspector moves to its left while it is open.
+ * It is docked in the sidebar beside the canvas; the inspector sits above it while it is open.
  * Every row can select its objects, which is what makes the numbers
  * checkable: the estimator can jump to the fourteen doors and count them.
  */
-import { DECLARABLE_UNITS, OUTPUT_UNITS, Unit, convertArea, convertLength, formatArea, formatLength, formatNumber } from './units';
+import { DECLARABLE_UNITS, OUTPUT_UNITS, Unit, formatCount } from './units';
 import { toCsv, toTsv } from './table';
 import { EMPTY_TAKEOFF, Takeoff } from './takeoff';
+import { TakeoffTab, takeoffTable } from './takeoffTable';
 
 export interface TakeoffPanelOptions {
   /** Name of the page being measured, for the panel header. */
@@ -82,7 +83,7 @@ interface TableRow {
   color?: string;
 }
 
-type Tab = 'blocks' | 'layers';
+type Tab = TakeoffTab;
 
 export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
   const panel = document.createElement('div');
@@ -90,11 +91,6 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
 
   let tab: Tab = 'blocks';
   let takeoff: Takeoff = EMPTY_TAKEOFF;
-
-  /** A length in drawing units, converted for display and export. */
-  const toLength = (value: number) => convertLength(value, options.drawingUnits(), options.unit());
-  /** An area in drawing units², converted for display and export. */
-  const toArea = (value: number) => convertArea(value, options.drawingUnits(), options.unit());
 
   // ── Header ────────────────────────────────────────────────────────────────
 
@@ -201,43 +197,13 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
 
   // ── What gets copied and saved ────────────────────────────────────────────
 
-  /** Column headings plus one line per entry, shared by the table and its exports, and the total under them. */
-  const tabTable = (): { labels: string[]; rows: TableRow[]; total: string[] } => {
-    const unit = options.unit();
-    if (tab === 'blocks') {
-      const count = takeoff.blocks.reduce((sum, row) => sum + row.count, 0);
-      return {
-        labels: ['Block', 'Count'],
-        rows: takeoff.blocks.map((row) => ({ cells: [row.name, String(row.count)], objects: row.objects })),
-        total: ['Total', count.toLocaleString()],
-      };
-    }
-    // "Drawing units" after every number, or in every heading, crowds the table
-    // off the panel; in drawing units the hint above the table says so once.
-    const length = (value: number) => (unit ? formatLength(toLength(value), unit) : formatNumber(value));
-    const area = (value: number) => (unit ? formatArea(toArea(value), unit) : formatNumber(value));
-    const per = (suffix: string) => (unit ? ` (${unit.label}${suffix})` : '');
-    return {
-      labels: ['Layer', 'Objects', `Length${per('')}`, `Area${per('²')}`, `Hatch area${per('²')}`],
-      rows: takeoff.layers.map((row) => ({
-        cells: [row.name, String(row.count), length(row.length), area(row.area), area(row.hatchArea)],
-        objects: row.objects,
-        color: options.layerColor(row.name),
-      })),
-      total: [
-        'Total',
-        takeoff.totals.count.toLocaleString(),
-        length(takeoff.totals.length),
-        area(takeoff.totals.area),
-        area(takeoff.totals.hatchArea),
-      ],
-    };
-  };
+  /** The open tab, as shown and as exported. */
+  const tabTable = () => takeoffTable(takeoff, tab, { unit: options.unit(), insunits: options.drawingUnits() });
 
-  /** The open tab as plain text: a header row, then one row per entry. */
+  /** The open tab as plain text for a spreadsheet: a header row, then one row per entry. */
   const currentRows = (): string[][] => {
     const { labels, rows } = tabTable();
-    return [labels, ...rows.map((row) => row.cells)];
+    return [labels, ...rows.map((row) => row.exported)];
   };
 
   // ── Footer ────────────────────────────────────────────────────────────────
@@ -316,7 +282,7 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
     title.textContent =
       takeoff.totals.count === 0
         ? `Quantities · ${page}`
-        : `Quantities · ${page} · ${takeoff.totals.count.toLocaleString()} objects`;
+        : `Quantities · ${page} · ${formatCount(takeoff.totals.count)} objects`;
 
     body.textContent = '';
     rowElements = [];
@@ -344,8 +310,11 @@ export function buildTakeoffPanel(options: TakeoffPanelOptions): TakeoffPanel {
       return row;
     };
     body.appendChild(line(labels, 'dwg-takeoff-head'));
-    for (const row of rows) body.appendChild(buildRow(row));
-    body.appendChild(line(total, 'dwg-takeoff-total'));
+    for (const row of rows) {
+      const color = tab === 'layers' ? options.layerColor(row.name) : undefined;
+      body.appendChild(buildRow({ cells: row.display, objects: row.objects, color }));
+    }
+    body.appendChild(line(total.display, 'dwg-takeoff-total'));
     syncSelection();
   }
 

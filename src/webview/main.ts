@@ -11,7 +11,7 @@ import {
   zoomCentre,
 } from './panZoom';
 import { toPngBase64, toStandaloneSvg } from './export';
-import { carryOverView, initialHiddenLayers } from './sceneState';
+import { carryOverView, countVisibleObjects, initialHiddenLayers } from './sceneState';
 import { LayerIndex } from './layerIndex';
 import { ObjectIndex } from './objectIndex';
 import { pickObject } from './pick';
@@ -20,7 +20,7 @@ import { SearchControl, buildSearchControl } from './searchPanel';
 import type { SearchHit } from './search';
 import { TakeoffPanel, buildTakeoffPanel } from './takeoffPanel';
 import { EMPTY_TAKEOFF, measureSelection, takeOff } from './takeoff';
-import { Unit, convertArea, convertLength, defaultUnit, formatArea, formatLength, knownUnits } from './units';
+import { Unit, convertArea, convertLength, defaultUnit, formatArea, formatCount, formatLength, knownUnits } from './units';
 import { UTF8_BOM } from './table';
 import type { DrawingDiff, ObjectInfo } from '../shared/types';
 import { renderDiff } from './diffView';
@@ -41,6 +41,14 @@ interface Scene {
 
 let scene: Scene | null = null;
 let canvasHost: HTMLElement | null = null;
+/**
+ * Column beside the canvas for the Quantities panel — docked rather than
+ * floating, so it never covers the drawing: the canvas narrows and the drawing
+ * fits what is left. While it is open the inspector sits at its top; otherwise
+ * the inspector floats over the canvas, so clicking an object does not make
+ * the drawing jump sideways.
+ */
+let sidebar: HTMLElement | null = null;
 let layerSlot: HTMLElement | null = null;
 let activeSvg: SVGSVGElement | null = null;
 let disposeActivePanZoom: (() => void) | null = null;
@@ -54,6 +62,8 @@ let fittedView: ViewBox | null = null;
 let cursorPoint: { x: number; y: number } | null = null;
 let statusBar: HTMLElement | null = null;
 let visibleEntityCount = 0;
+/** What the status bar reports: objects, the unit of the layer panel and Quantities. */
+let visibleObjectCount = 0;
 let pageSelect: HTMLSelectElement | null = null;
 /** Elements of the page on screen by layer, so a layer toggle never re-renders. */
 let layerIndex = new LayerIndex<SVGElement>();
@@ -109,10 +119,6 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
   disposeActivePanZoom?.();
   disposeActivePanZoom = null;
   host.innerHTML = '';
-  // The quantities panel lives over the canvas and outlasts a redraw (a page
-  // switch, say); clearing it out of the DOM left it "open" but gone, so the
-  // next press of Quantities closed it instead of showing it.
-  if (takeoffPanel) host.appendChild(takeoffPanel.element);
 
   const svg = document.createElementNS(SVG_NS, 'svg') as SVGSVGElement;
   svg.setAttribute('width', '100%');
@@ -244,6 +250,7 @@ function applyLayerVisibility(): void {
 function refreshVisibleCount(page: DxfPage, hiddenLayers: Set<string>): void {
   const visibleOnPage = page.entities.filter((e) => !hiddenLayers.has(e.layer)).length;
   visibleEntityCount = visibleOnPage + countVisibleViewportEntities(page, hiddenLayers);
+  visibleObjectCount = countVisibleObjects(page, hiddenLayers);
 
   // Nothing on screen must never be a bare rectangle — say why it is empty.
   emptyState?.remove();
@@ -271,9 +278,7 @@ function countVisibleViewportEntities(page: DxfPage, hiddenLayers: Set<string>):
  * Showing a bare rectangle for either one reads as a broken extension.
  */
 function buildEmptyState(page: DxfPage, hiddenLayers: Set<string>): HTMLElement {
-  const totalOnPage =
-    page.entities.length +
-    (page.viewports ?? []).reduce((total, view) => total + view.entities.length, 0);
+  const totalOnPage = countVisibleObjects(page, new Set());
 
   const box = document.createElement('div');
   box.className = 'dwg-empty';
@@ -289,7 +294,7 @@ function buildEmptyState(page: DxfPage, hiddenLayers: Set<string>): HTMLElement 
     title.textContent = 'Every layer on this sheet is hidden';
     detail.textContent =
       `${hiddenCount} of ${page.layers.length} layers are switched off, ` +
-      `which hides all ${totalOnPage.toLocaleString()} objects here.`;
+      `which hides all ${formatCount(totalOnPage)} objects here.`;
 
     const action = document.createElement('button');
     action.className = 'dwg-empty-action';
@@ -379,7 +384,7 @@ function select(objs: number[], options: { zoom: boolean; inspect: boolean }): v
     if (info) {
       const layer = scene?.pages[scene.pageIndex].layers.find((l) => l.name === info.layer);
       inspector = buildInspector(info, layer?.color, clearSelection);
-      canvasHost.appendChild(inspector);
+      placeInspector();
     }
   }
   // The status bar carries what the selection measures, so it follows a plain
@@ -519,7 +524,7 @@ function updateStatusBar(): void {
     statusBar.appendChild(span(`Zoom ${zoom >= 10 ? zoom.toFixed(0) : zoom.toFixed(1)}%`));
   }
 
-  statusBar.appendChild(span(`${visibleEntityCount.toLocaleString()} objects`));
+  statusBar.appendChild(span(`${formatCount(visibleObjectCount)} objects`));
 
   // What the current selection measures, so a number on screen can always be
   // traced back to the objects it came from.
@@ -717,7 +722,7 @@ function buildLayerControl(scene: Scene): HTMLElement | null {
 
     const count = document.createElement('span');
     count.className = 'dwg-layer-count';
-    count.textContent = String(layer.entityCount);
+    count.textContent = formatCount(layer.objectCount);
 
     const only = document.createElement('button');
     only.className = 'dwg-layer-isolate';
@@ -775,9 +780,9 @@ function toggleTakeoffPanel(): void {
     return;
   }
   takeoffPanel = null;
-  if (!canvasHost) return;
+  if (!sidebar) return;
   try {
-    openTakeoffPanel(canvasHost);
+    openTakeoffPanel(sidebar);
   } catch (err) {
     // A button that does nothing is the worst outcome; say what went wrong.
     // TypeScript cannot see openTakeoffPanel setting it before the throw
@@ -817,13 +822,20 @@ function openTakeoffPanel(host: HTMLElement): void {
     onExportCsv: (text) => vscodeApi.postMessage({ type: 'EXPORT', format: 'csv', data: UTF8_BOM + text }),
   });
   host.appendChild(takeoffPanel.element);
-  host.classList.add('dwg-with-takeoff');
+  placeInspector();
 }
 
 function closeTakeoffPanel(): void {
   takeoffPanel?.element.remove();
   takeoffPanel = null;
-  canvasHost?.classList.remove('dwg-with-takeoff');
+  placeInspector();
+}
+
+/** Over the canvas, or above the Quantities panel while that is open. */
+function placeInspector(): void {
+  if (!inspector) return;
+  if (takeoffPanel?.element.isConnected && sidebar) sidebar.prepend(inspector);
+  else canvasHost?.appendChild(inspector);
 }
 
 /**
@@ -957,9 +969,14 @@ function renderScene(
 
   canvasHost = document.createElement('div');
   canvasHost.className = 'dwg-canvas';
+  sidebar = document.createElement('aside');
+  sidebar.className = 'dwg-sidebar';
+  const workspace = document.createElement('div');
+  workspace.className = 'dwg-workspace';
+  workspace.append(canvasHost, sidebar);
 
   root.appendChild(toolbar);
-  root.appendChild(canvasHost);
+  root.appendChild(workspace);
   root.appendChild(buildStatusBar());
   refreshLayerControl();
   redraw(false);

@@ -46,6 +46,12 @@ interface FileResult {
    * as geometry outside the drawing frame.
    */
   extents?: string[];
+  /**
+   * INSERTs still listed under an anonymous name (`*U12`, `*B24`) rather than
+   * the dynamic block they stand for. The scan once looked in the wrong
+   * section and every file kept these names, with every unit test passing.
+   */
+  anonymousInserts?: number;
   blocks?: number;
   skipped?: string[];
 }
@@ -104,6 +110,7 @@ async function runFile(filePath: string, logLines: string[]): Promise<FileResult
     );
     result.layers = new Set(parsed.pages.flatMap((p) => p.layers.map((l) => l.name))).size;
     result.extents = parsed.pages.map((page) => extentsOf(page.bounds));
+    result.anonymousInserts = parsed.objects.filter((o) => o.type === 'INSERT' && o.block?.startsWith('*')).length;
     result.skipped = parsed.skippedEntityTypes.slice().sort();
     result.ok = true;
   } catch (err) {
@@ -189,6 +196,9 @@ function compareWithBaseline(results: FileResult[], baselinePath: string): numbe
       const delta = now.viewportEntities! - was.viewportEntities;
       const line = `${now.file}: ${was.viewportEntities} → ${now.viewportEntities} entities in viewports (${delta > 0 ? '+' : ''}${delta})`;
       (delta < 0 ? regressions : improvements).push(line);
+    }
+    if (was.ok && now.ok && was.anonymousInserts !== undefined && now.anonymousInserts! > was.anonymousInserts) {
+      regressions.push(`${now.file}: ${was.anonymousInserts} → ${now.anonymousInserts} INSERTs under an anonymous block name`);
     }
     // Recorded since 2026-10-08; older baselines have no extents to compare.
     if (was.ok && now.ok && was.extents && now.extents && was.extents.join('|') !== now.extents.join('|')) {

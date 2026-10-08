@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { measureSelection, takeOff } from '../src/webview/takeoff';
-import { DECLARABLE_UNITS, DRAWING_UNITS, NO_VALUE, convertArea, convertLength, defaultUnit, knownUnits, formatArea, formatLength } from '../src/webview/units';
+import { DECLARABLE_UNITS, DRAWING_UNITS, NO_VALUE, convertArea, convertLength, defaultUnit, knownUnits, exportNumber, formatArea, formatCount, formatLength, formatNumber } from '../src/webview/units';
+import { takeoffTable } from '../src/webview/takeoffTable';
 import { UTF8_BOM, csvField, toCsv, toTsv } from '../src/webview/table';
 import type { ObjectInfo } from '../src/shared/types';
 
@@ -215,4 +216,55 @@ test('with every layer shown, a block measures in full on its own layer', () => 
 test('a selection leaves out the parts on hidden layers too', () => {
   assert.equal(measureSelection([door], [0], new Set(['SWING'])).length, 1);
   assert.equal(measureSelection([door], [0]).length, 3);
+});
+
+// ── Numbers on screen and in exports ─────────────────────────────────────
+
+test('numbers on screen are grouped by thousands', () => {
+  assert.equal(formatNumber(329773.789), '329,773.79');
+  assert.equal(formatLength(12600, defaultUnit(6)), '12,600.00 m');
+  assert.equal(formatCount(6793), '6,793');
+});
+
+test('exported numbers are plain, so a spreadsheet reads them as numbers', () => {
+  assert.equal(exportNumber(329773.789), '329773.79');
+  assert.equal(exportNumber(0), '');
+  assert.equal(exportNumber(undefined), '');
+});
+
+const metric = takeOff(
+  [
+    object({ type: 'LWPOLYLINE', layer: 'WALLS', length: 12600, area: 24_000_000 }),
+    object({ type: 'INSERT', layer: 'DOORS', block: 'Door-900', length: 2400 }),
+  ],
+  0,
+  none
+);
+const mm = { unit: defaultUnit(4), insunits: 4 };
+
+test('the unit sits in the column heading, not after every number', () => {
+  const table = takeoffTable(metric, 'layers', mm);
+  assert.deepEqual(table.labels, ['Layer', 'Objects', 'Length (m)', 'Area (m²)', 'Hatch area (m²)']);
+  const walls = table.rows.find((row) => row.name === 'WALLS')!;
+  assert.deepEqual(walls.display, ['WALLS', '1', '12.60', '24.00', NO_VALUE]);
+});
+
+test('copied and exported rows carry bare numbers and leave empty cells empty', () => {
+  const table = takeoffTable(metric, 'layers', mm);
+  const walls = table.rows.find((row) => row.name === 'WALLS')!;
+  assert.deepEqual(walls.exported, ['WALLS', '1', '12.60', '24.00', '']);
+  assert.deepEqual(table.total.exported, ['Total', '2', '15.00', '24.00', '']);
+});
+
+test('in drawing units the headings name no unit', () => {
+  const table = takeoffTable(metric, 'layers', { unit: undefined, insunits: 0 });
+  assert.deepEqual(table.labels, ['Layer', 'Objects', 'Length', 'Area', 'Hatch area']);
+  assert.equal(table.rows.find((row) => row.name === 'WALLS')!.display[2], '12,600.00');
+});
+
+test('the blocks tab lists counts', () => {
+  const table = takeoffTable(metric, 'blocks', mm);
+  assert.deepEqual(table.labels, ['Block', 'Count']);
+  assert.deepEqual(table.rows.map((row) => row.exported), [['Door-900', '1']]);
+  assert.deepEqual(table.total.display, ['Total', '1']);
 });

@@ -369,14 +369,13 @@ test('a unitless drawing ($INSUNITS 0) reports none', () => {
 // ── Dynamic block names ──────────────────────────────────────────────────
 
 /**
- * A file whose OBJECTS section declares `*B24` as a representation of `Window`
- * — the shape AutoCAD writes for a dynamic block.
+ * A file whose BLOCK_RECORD table declares `*B24` as a representation of
+ * `Window` — the shape AutoCAD (and libredwg) write for a dynamic block. The
+ * table sits in TABLES, after LAYER, as in every real file.
  */
 const withBlockRecords = (represented: string, ...body: string[]) =>
   dxf(
-    '0', 'SECTION', '2', 'TABLES', '0', 'TABLE', '2', 'LAYER', ...layer('0', 7), '0', 'ENDTAB', '0', 'ENDSEC',
-    ...body,
-    '0', 'SECTION', '2', 'OBJECTS',
+    '0', 'SECTION', '2', 'TABLES', '0', 'TABLE', '2', 'LAYER', ...layer('0', 7), '0', 'ENDTAB',
     '0', 'TABLE', '2', 'BLOCK_RECORD',
     '5', 'C', '2', 'BLOCK_RECORD_TABLE', '340', '0',
     '0', 'BLOCK_RECORD', '5', 'A1', '2', 'Window', '340', '11',
@@ -385,6 +384,7 @@ const withBlockRecords = (represented: string, ...body: string[]) =>
     '1001', 'AcDbBlockRepBTag', '1005', represented,
     '0', 'ENDTAB',
     '0', 'ENDSEC',
+    ...body,
     '0', 'EOF'
   );
 

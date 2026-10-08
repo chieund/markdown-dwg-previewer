@@ -901,13 +901,16 @@ function extraLayouts(
  * them fine in CAD software.
  */
 function collectLayers(entities: DxfEntity[], context: ParseContext): LayerInfo[] {
-  const counts = new Map<string, number>();
+  // Objects per layer; a piece that belongs to no object counts on its own
+  const objects = new Map<string, Set<number | DxfEntity>>();
   for (const entity of entities) {
-    counts.set(entity.layer, (counts.get(entity.layer) ?? 0) + 1);
+    let set = objects.get(entity.layer);
+    if (!set) objects.set(entity.layer, (set = new Set()));
+    set.add(entity.obj ?? entity);
   }
 
-  return Array.from(counts, ([name, entityCount]): LayerInfo => {
-    const info: LayerInfo = { name, color: layerColor(name, context) ?? FALLBACK_COLOR, entityCount };
+  return Array.from(objects, ([name, set]): LayerInfo => {
+    const info: LayerInfo = { name, color: layerColor(name, context) ?? FALLBACK_COLOR, objectCount: set.size };
     // A negative colour in the layer table means the layer is switched off.
     if (context.trustLayerOffFlags && context.layers[name]?.visible === false) info.off = true;
     return info;

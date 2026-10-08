@@ -100,7 +100,12 @@ export interface Bounds {
 export interface LayerInfo {
   name: string;
   color: string;
-  entityCount: number;
+  /**
+   * Objects with something drawn on this layer — a door drawn on DOORS with
+   * its swing on SWING counts once on each. The same unit as the status bar
+   * and the Quantities panel, so the numbers on screen agree.
+   */
+  objectCount: number;
   /** Switched off in the CAD file itself; the viewer starts with it hidden. */
   off?: boolean;
 }

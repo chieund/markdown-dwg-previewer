@@ -2,9 +2,9 @@
 
 **Last updated:** 2026-10-08
 
-**Status:** v1.2.0 released to `master` (tag `v1.2.0`), not yet on the Marketplace — waiting on `vsce login bumkom`. Since then (unreleased): dimensions drawn in full; libredwg-web 0.7.14; unsupported entities named; corpus widened to 23 public drawings. 264 unit tests, typecheck clean.
+**Status:** v1.2.0 released to `master` (tag `v1.2.0`), not yet on the Marketplace — waiting on `vsce login bumkom`. Since then (unreleased): dimensions drawn in full; libredwg-web 0.7.14; unsupported entities named; corpus widened to 23 public drawings; UI review (docked Quantities, export without units, dynamic block names fixed). 273 unit tests, typecheck clean.
 
-**Opens:** `.dwg` and `.dxf` · **264 unit tests** · **corpus 23/23** public + 3/3 private (2026-10-08) · 91 sample drawings parse cleanly · typecheck clean
+**Opens:** `.dwg` and `.dxf` · **273 unit tests** · **corpus 23/23** public + 3/3 private (2026-10-08) · 91 sample drawings parse cleanly · typecheck clean
 
 ---
 
@@ -337,6 +337,25 @@ An independent reviewer then re-reviewed the fixes themselves and caught 2 bugs 
 - The corpus now also counts entities inside viewports (`viewportEntities`) — the bug above slipped through precisely because they weren't counted before.
 
 ---
+
+## 🖥️ UI review (2026-10-08)
+
+Screenshots of every state (sheet, layers, Find, inspector, Quantities, diff) at 1400 px and at
+640 px (`PREVIEW_SIZE=640x760 npm run preview …`, a split editor).
+
+| Finding | Change |
+|---|---|
+| Quantities floated over the canvas: at 1400 px it hid the elevation, at 640 px nearly the whole drawing, and the inspector landed on the panel's own tabs | Quantities is docked in a sidebar (`.dwg-workspace` = canvas + sidebar); the canvas narrows and the drawing fits what is left. Under 720 px the sidebar goes below the canvas. The inspector floats as before when alone — docking it would shift the drawing on every click — and sits at the top of the sidebar while Quantities is open |
+| **Copy table / Export CSV wrote `86.04 m`** — Excel reads that as text and cannot sum it; the heading already named the unit | `src/webview/takeoffTable.ts` builds each row twice: `display` (`12,600.00`, `—`) and `exported` (`12600.00`, empty) |
+| Headings were uppercased by CSS: `Length (m)` read `LENGTH (M)` — megametres | No `text-transform` on the heading row |
+| No thousands separators in the table (`329773.79`) while the status bar had them | `formatNumber` / `formatCount` group with `Intl.NumberFormat('en-US')` |
+| "objects" meant two things: the status bar said 8,456 and Quantities 6,793; the layer panel said DIMENSIONS 360, Quantities 80 | Status bar and layer panel count objects (`countVisibleObjects`, `LayerInfo.objectCount`): a door is one object however many lines draw it, and an object seen through two viewports counts once |
+| The Total row let the rows scrolling under it show through a 2 px gap | No bottom padding on the table body |
+| The status-bar hint was cut mid-word in a narrow editor | It shrinks with an ellipsis first |
+| **Dynamic blocks were never resolved in a real file** — the Blocks tab listed `*B17`, `*U38`… The scanner looked for `BLOCK_RECORD` in OBJECTS; it is a TABLES table. Its unit-test fixture made the same mistake, so every test passed | `scanBlockNames` reads TABLES; the fixture now has the real layout. `blocks_and_tables` resolve 29/30 (imperial) and 36/37 (metric): Door 10, Window 42, Toilet 4. The corpus records `anonymousInserts` and flags a rise — reverting the fix flags 8 drawings |
+
+Marketplace screenshots `marketplace-quantities/locate/find.png` regenerated (the old Quantities shot showed
+`LENGTH (FT)` over `1351.71 ft`).
 
 ## 🧪 Corpus widened (2026-10-08)
 
