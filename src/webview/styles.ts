@@ -191,7 +191,9 @@ export const WEBVIEW_STYLES = `
     .dwg-takeoff-tab:hover { color: var(--dwg-text); }
     .dwg-takeoff-tab:focus-visible { outline: 1px solid var(--dwg-focus); outline-offset: -2px; }
     .dwg-takeoff-tab-active { color: var(--dwg-text); border-bottom-color: var(--dwg-focus); }
-    .dwg-takeoff-body { flex: 1 1 auto; overflow-y: auto; padding: 2px 0; }
+    /* No bottom padding: the sticky total stops at the padding edge, and rows
+       scrolling underneath would show through the gap below it. */
+    .dwg-takeoff-body { flex: 1 1 auto; overflow-y: auto; padding: 2px 0 0; }
     /* Header, rows and total share one grid per tab, so every number sits under its heading. */
     .dwg-takeoff-row {
       display: grid; align-items: center; column-gap: 8px; padding: 1px 8px; min-height: 24px;
@@ -277,7 +279,8 @@ export const WEBVIEW_STYLES = `
       white-space: nowrap; overflow: hidden;
     }
     .dwg-status-spacer { flex: 1 1 auto; }
-    .dwg-status-hint { flex: 0 0 auto; opacity: 0.75; }
+    /* The hint gives way first on a narrow editor; the numbers matter more. */
+    .dwg-status-hint { flex: 0 1 auto; min-width: 0; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; }
     .dwg-error { color: var(--dwg-error); padding: 16px; font-family: var(--vscode-editor-font-family, monospace); white-space: pre-wrap; margin: 0; }
     .dwg-loading {
       display: flex; align-items: center; justify-content: center; gap: 12px;

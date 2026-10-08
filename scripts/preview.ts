@@ -19,8 +19,8 @@ import { parseDxf } from '../src/dxf/parseDxf';
 import { diffDrawings } from '../src/diff/diffDrawings';
 import { WEBVIEW_STYLES } from '../src/webview/styles';
 
-const WIDTH = 1400;
-const HEIGHT = 900;
+// PREVIEW_SIZE=700x900 checks the layout in a split editor
+const [WIDTH, HEIGHT] = (process.env.PREVIEW_SIZE ?? '1400x900').split('x').map(Number);
 
 const BROWSERS = ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable'];
 
