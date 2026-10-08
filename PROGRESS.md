@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-08
 
-**Status:** v1.2.0 released to `master` (tag `v1.2.0`), not yet on the Marketplace — waiting on `vsce login bumkom`. Since then (unreleased): dimensions drawn in full; libredwg-web 0.7.14; unsupported entities named; corpus widened to 23 public drawings; UI review (docked Quantities, export without units, dynamic block names fixed). 273 unit tests, typecheck clean.
+**Status:** v1.2.1 packaged (`dwg-previewer-1.2.1.vsix`), not yet on the Marketplace — waiting on `vsce login bumkom`. Since 1.2.0: dimensions drawn in full; libredwg-web 0.7.14; unsupported entities named; corpus widened to 23 public drawings; UI review (docked Quantities, export without units, dynamic block names fixed). 273 unit tests, typecheck clean.
 
 **Opens:** `.dwg` and `.dxf` · **273 unit tests** · **corpus 23/23** public + 3/3 private (2026-10-08) · 91 sample drawings parse cleanly · typecheck clean
 

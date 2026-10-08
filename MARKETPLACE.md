@@ -100,9 +100,8 @@ This is a 2D viewer. 3D drawings open, but solids are not rendered; 3DFACE geome
 as wireframe.
 
 **A drawing looks incomplete — why?**
-The toolbar shows a banner naming entity types it read but couldn't draw. Some types
-(LEADER, MULTILEADER, TABLE, WIPEOUT, 3D solids) are dropped before that point and are not
-listed yet, so a drawing can be missing those without a banner. Objects hidden in the file
+The toolbar shows a banner naming every entity type in the drawing that this viewer can't draw
+yet — LEADER, MULTILEADER, TABLE, WIPEOUT and 3D solids are the common ones. Objects hidden in the file
 itself — invisible attributes, hidden dynamic-block states — are left out on purpose, as in
 AutoCAD. Please report drawings that look wrong.
 
