@@ -121,6 +121,25 @@ test('find_text finds labels drawn inside a block and points at the INSERT', asy
   assert.equal(r.matches.filter((m: { text?: string }) => m.text === 'Cửa D2').length, 1);
 });
 
+test('find_text lists an attribute once, on its INSERT, not again as text drawn in the block', async () => {
+  const src = dxf(
+    '0', 'SECTION', '2', 'BLOCKS',
+    '0', 'BLOCK', '2', 'DOOR', '70', '2', '10', '0', '20', '0', '30', '0',
+    '0', 'LINE', '8', '0', '10', '0', '20', '0', '30', '0', '11', '1', '21', '0', '31', '0',
+    '0', 'ENDBLK',
+    '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'INSERT', '5', 'I1', '8', '0', '66', '1', '2', 'DOOR', '10', '5', '20', '5', '30', '0',
+    '0', 'ATTRIB', '5', 'A1', '330', 'I1', '8', '0', '10', '5', '20', '6', '30', '0', '40', '1', '1', 'D-01', '2', 'TAG', '70', '0',
+    '0', 'SEQEND', '5', 'S1', '8', '0',
+    '0', 'ENDSEC', '0', 'EOF'
+  );
+  const r = await json(hostFor(src), 'dwg_find_text', { query: 'D-01' });
+  assert.equal(r.totalMatches, 1, JSON.stringify(r.matches));
+  assert.equal(r.matches[0].id, 0);
+  assert.deepEqual(r.matches[0].attributes, { TAG: 'D-01' });
+});
+
 test('warnings from a cut-short drawing reach every reading tool', async () => {
   const parsed = parseDxf(fixture());
   parsed.warnings = ['Drawing cut short after 1000 entities'];

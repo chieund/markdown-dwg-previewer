@@ -338,7 +338,9 @@ function findText(stored: StoredDrawing, args: Args): ToolContent[] {
     for (const entity of p.entities) {
       if (entity.type !== 'TEXT' || !entity.text || entity.obj === undefined) continue;
       const owner = stored.parsed.objects[entity.obj];
-      if (!owner || owner.type !== 'INSERT') continue;
+      if (!owner || owner.type !== 'INSERT' || owner.empty) continue;
+      // A drawn ATTRIB is text of its INSERT too, but the INSERT's own match already lists it
+      if (owner.attributes?.some((a) => !a.hidden && a.value === entity.text)) continue;
       if (!want(entity.text, pageIndex, entity.layer)) continue;
       total++;
       if (hits.length < limit) hits.push({ kind: 'nested', owner: entity.obj, page: pageIndex, entity });

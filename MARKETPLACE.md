@@ -9,6 +9,12 @@ export it as an image.
 
 Works fully offline on Windows, macOS and Linux. Your drawings never leave your machine.
 
+> ☕ **Free, open source, and kept up to date by one developer.** If it saved you an AutoCAD
+> launch or a license, please consider supporting it:
+> **[Buy me a coffee](https://buymeacoffee.com/bumkom)** — every coffee keeps the updates coming.
+>
+> [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-Support%20this%20extension-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/bumkom)
+
 ![A multi-sheet architectural drawing open in VS Code: the floor plan seen through its viewport, with the title block and legend around it](assets/marketplace-sheet.png)
 
 ---
@@ -173,10 +179,23 @@ the drawing.
 
 ---
 
+## More extensions by bumkom
+
+| | Extension | What it does | Highlights |
+|---|---|---|---|
+| 📐 CAD | **[DXF Previewer](https://marketplace.visualstudio.com/items?itemName=bumkom.dxf-previewer)** | Preview 2D DXF drawings in VS Code | Opens the drawing instead of raw text |
+| 📝 Markdown | **[Markdown Viewer Premium](https://marketplace.visualstudio.com/items?itemName=bumkom.markdown-viewer-premium)** | Markdown preview and export to PDF, Word and HTML | Mermaid · PlantUML · Graphviz · KaTeX math · Jira & Backlog markup · Obsidian callouts and wiki links · offline |
+| 📝 Markdown | **[Markdown Viewer Lite (Pele)](https://marketplace.visualstudio.com/items?itemName=bumkom.markdown-viewer-lite)** | Fast, lightweight Markdown preview | TOC · in-page search · syntax highlighting · Pele-powered Mermaid diagrams · HTML/PDF export |
+| 🤖 AI coding | **[Bumeter — AI Coding Token Usage](https://marketplace.visualstudio.com/items?itemName=bumkom.bumeter)** | See where your Claude Code, Kiro and OpenCode tokens go | Quota and reset times · what consumed the quota · conversations ranked by tokens · skill costs · local only |
+| 🤖 AI coding | **[Claude Code Usage](https://marketplace.visualstudio.com/items?itemName=bumkom.bumeter-claude-usage)** | Claude Code quota and context size in the status bar | 5-hour and weekly quota · reset countdown · alerts at 80 % / 90 % · usage analytics · local only |
+| 🤖 AI coding | **[Claude Code Skills Manager](https://marketplace.visualstudio.com/items?itemName=bumkom.bumeter-claude-skills)** | Install, enable, disable and remove Claude Code skills | Install from skills.sh, git or a folder · token cost per skill · skills leaderboard · undo and trash recovery |
+
+---
+
 ## Support the project
 
-The extension is free and stays free. If it saved you an AutoCAD launch or a license, you can
-[buy me a coffee ☕](https://buymeacoffee.com/bumkom) — it keeps the updates coming.
+The extension is free and stays free. If it saved you an AutoCAD launch or a license,
+**[buy me a coffee ☕](https://buymeacoffee.com/bumkom)** — it keeps the updates coming.
 
 ---
 

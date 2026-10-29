@@ -21,7 +21,16 @@
     "2d",
     "viewer",
     "architecture",
-    "engineering"
+    "engineering",
+    "autocad viewer",
+    "dwg reader",
+    "open dwg without autocad",
+    "quantity takeoff",
+    "cad diff",
+    "mcp",
+    "ai",
+    "claude",
+    "copilot"
   ],
   "sponsor": {
     "url": "https://buymeacoffee.com/bumkom"
@@ -34,7 +43,8 @@
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Visualization"
+    "Visualization",
+    "AI"
   ],
   "activationEvents": [
     "onStartupFinished"
