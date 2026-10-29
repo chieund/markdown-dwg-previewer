@@ -9,6 +9,12 @@ export it as an image.
 
 Works fully offline on Windows, macOS and Linux. Your drawings never leave your machine.
 
+> ☕ **Free, open source, and kept up to date by one developer.** If it saved you an AutoCAD
+> launch or a license, please consider supporting it:
+> **[Buy me a coffee](https://buymeacoffee.com/bumkom)** — every coffee keeps the updates coming.
+>
+> [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-Support%20this%20extension-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/bumkom)
+
 ![A multi-sheet architectural drawing open in VS Code: the floor plan seen through its viewport, with the title block and legend around it](assets/marketplace-sheet.png)
 
 ---
@@ -123,10 +129,45 @@ on an object are kept too. Layers switched off in a DXF start hidden.
 
 ---
 
+## Ask AI about your drawing
+
+Let an AI agent read the drawing you have open, so you can ask "how many doors are on this plan?" or "what size is the largest room?" and get an answer from the drawing itself instead of counting by eye.
+
+**What an agent can do**
+
+- Read the drawing: overview (sheets, layers, block counts), text search, and dimensions — counts, sizes and notes
+- Highlight and zoom in the preview, so you can see what it is talking about
+- Take a snapshot of the view (or a region) to look at it
+
+Vietnamese text in the old TCVN3 fonts (`.Vn*`) now displays correctly in the preview and for the agent.
+
+**Setup**
+
+| Agent | How |
+|-------|-----|
+| Claude Code | Run **DWG: Connect AI Agents…** (or accept the prompt the first time you open a drawing; it only appears when Claude Code is installed). This runs `claude mcp add` for you and registers the server as `dwg-previewer`. |
+| GitHub Copilot | Automatic on VS Code 1.101 or newer. The tools appear in Copilot Chat agent mode; the first use in a session may take a moment while the server starts. |
+| Other agents | Run **DWG: Connect AI Agents…** and copy the URL and the `Authorization` header. Add them to the agent's MCP settings; the config format differs per agent, see its MCP documentation. |
+
+**Which files an agent can read.** Drawings in your workspace folders and drawings open in a preview are free. Any other `.dwg` / `.dxf` needs your click on a modal **Allow** prompt first.
+
+**Settings**
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `dwgPreviewer.ai.enabled` | Run the local server that lets AI agents read drawings. It starts the first time you open a drawing, connect an agent or Copilot asks for it. Off: the server stops and nothing new is cached; **DWG: Clear Drawing Cache** removes drawings cached earlier. | `true` |
+| `dwgPreviewer.ai.port` | Local port of the server (127.0.0.1 only). If another program uses it, you are told once and AI features stay off until you pick another port. | `45131` |
+
+**Limits.** It works only while VS Code is open — the server lives inside the extension.
+
+**Privacy.** The extension itself sends nothing anywhere. When your agent calls a tool, the drawing text, numbers and snapshots it asks for go to the AI model you chose for that agent, and only then. Agents normally ask before calling a tool. The server listens on 127.0.0.1 and requires a token. Note: Connect passes that token to `claude mcp add` on its command line, so other local processes could see it while that command runs.
+
+---
+
 ## Settings
 
-None required. One optional setting, `dwgPreviewer.converterPath`, lets you point at an
-external converter for unusual files — almost nobody needs it.
+Nothing is required. `dwgPreviewer.converterPath` lets you point at an external converter for
+unusual files — almost nobody needs it. The AI settings are listed under *Ask AI about your drawing*.
 
 ---
 
@@ -138,10 +179,23 @@ the drawing.
 
 ---
 
+## More extensions by bumkom
+
+| | Extension | What it does | Highlights |
+|---|---|---|---|
+| 📐 CAD | **[DXF Previewer](https://marketplace.visualstudio.com/items?itemName=bumkom.dxf-previewer)** | Preview 2D DXF drawings in VS Code | Opens the drawing instead of raw text |
+| 📝 Markdown | **[Markdown Viewer Premium](https://marketplace.visualstudio.com/items?itemName=bumkom.markdown-viewer-premium)** | Markdown preview and export to PDF, Word and HTML | Mermaid · PlantUML · Graphviz · KaTeX math · Jira & Backlog markup · Obsidian callouts and wiki links · offline |
+| 📝 Markdown | **[Markdown Viewer Lite (Pele)](https://marketplace.visualstudio.com/items?itemName=bumkom.markdown-viewer-lite)** | Fast, lightweight Markdown preview | TOC · in-page search · syntax highlighting · Pele-powered Mermaid diagrams · HTML/PDF export |
+| 🤖 AI coding | **[Bumeter — AI Coding Token Usage](https://marketplace.visualstudio.com/items?itemName=bumkom.bumeter)** | See where your Claude Code, Kiro and OpenCode tokens go | Quota and reset times · what consumed the quota · conversations ranked by tokens · skill costs · local only |
+| 🤖 AI coding | **[Claude Code Usage](https://marketplace.visualstudio.com/items?itemName=bumkom.bumeter-claude-usage)** | Claude Code quota and context size in the status bar | 5-hour and weekly quota · reset countdown · alerts at 80 % / 90 % · usage analytics · local only |
+| 🤖 AI coding | **[Claude Code Skills Manager](https://marketplace.visualstudio.com/items?itemName=bumkom.bumeter-claude-skills)** | Install, enable, disable and remove Claude Code skills | Install from skills.sh, git or a folder · token cost per skill · skills leaderboard · undo and trash recovery |
+
+---
+
 ## Support the project
 
-The extension is free and stays free. If it saved you an AutoCAD launch or a license, you can
-[buy me a coffee ☕](https://buymeacoffee.com/bumkom) — it keeps the updates coming.
+The extension is free and stays free. If it saved you an AutoCAD launch or a license,
+**[buy me a coffee ☕](https://buymeacoffee.com/bumkom)** — it keeps the updates coming.
 
 ---
 

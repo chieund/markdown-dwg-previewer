@@ -1,3 +1,5 @@
+import { computeBounds } from '../shared/bounds';
+import type { DxfEntity } from '../shared/types';
 import { Bounds, DxfPage, SVG_NS, ViewportView, renderEntity } from './renderer';
 import {
   BUTTON_STEP,
@@ -22,7 +24,19 @@ import { TakeoffPanel, buildTakeoffPanel } from './takeoffPanel';
 import { EMPTY_TAKEOFF, measureSelection, takeOff } from './takeoff';
 import { Unit, convertArea, convertLength, defaultUnit, formatArea, formatCount, formatLength, knownUnits } from './units';
 import { UTF8_BOM } from './table';
-import type { DrawingDiff, ObjectInfo } from '../shared/types';
+import { SHOW_DRAWN_WAIT_MS, type AgentResult, type DrawingDiff, type DrawingKey, type ObjectInfo } from '../shared/types';
+import {
+  AgentRequest,
+  AgentScene,
+  AgentState,
+  NOT_LOADED_MESSAGE,
+  ShowPlan,
+  parseAgentMessage,
+  planShow,
+  planSnapshot,
+  regionViewBox,
+  waitUntilDrawn,
+} from './agent';
 import { renderDiff } from './diffView';
 
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void };
@@ -54,6 +68,17 @@ let activeSvg: SVGSVGElement | null = null;
 let disposeActivePanZoom: (() => void) | null = null;
 /** Incremented on each renderCanvas call; stale rAF chains check this and bail. */
 let renderGeneration = 0;
+/** True while a page's later batches wait for animation frames: its elements are not all drawn yet. */
+let batchesPending = false;
+/** Agent shows waiting for the batches to finish (see waitUntilDrawn); each re-checks batchesPending. */
+const drawnWaiters = new Set<() => void>();
+function notifyDrawn(): void {
+  for (const wake of [...drawnWaiters]) wake();
+}
+function onDrawn(wake: () => void): () => void {
+  drawnWaiters.add(wake);
+  return () => drawnWaiters.delete(wake);
+}
 /** Dispose function for the document-level click listener on the layer panel. */
 let disposeLayerOutsideClick: (() => void) | null = null;
 /** The fitted view of the current page — zoom is reported relative to it. */
@@ -115,6 +140,7 @@ const EMPTY_VIEW: ViewBox = { x: -50, y: -50, w: 100, h: 100 };
 function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string>, keepView: boolean) {
   const previousView = keepView && activeSvg ? getViewBox(activeSvg) : null;
   const thisGeneration = ++renderGeneration;
+  batchesPending = false;
 
   disposeActivePanZoom?.();
   disposeActivePanZoom = null;
@@ -166,6 +192,7 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
   if (entities.length > BATCH_SIZE) {
     // Large drawing: render the rest progressively so the UI stays responsive
     let offset = BATCH_SIZE;
+    batchesPending = true;
     const renderNextBatch = () => {
       // Bail if a newer renderCanvas call has started
       if (renderGeneration !== thisGeneration) return;
@@ -175,8 +202,12 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
       styleGroup.appendChild(fragment);
       offset = end;
       if (offset < entities.length) requestAnimationFrame(renderNextBatch);
-      // The selection may include elements drawn only now
-      else if (selection.length) refreshHighlight();
+      else {
+        batchesPending = false;
+        // The selection may include elements drawn only now
+        if (selection.length) refreshHighlight();
+        notifyDrawn();
+      }
     };
     requestAnimationFrame(renderNextBatch);
   }
@@ -231,6 +262,8 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
 
   emptyState = null;
   refreshVisibleCount(page, hiddenLayers);
+  // A redraw that replaced a page still drawing may have finished at once.
+  notifyDrawn();
 }
 
 /**
@@ -1011,6 +1044,8 @@ function describe(err: unknown): string {
 
 function showError(message: string) {
   scene = null;
+  batchesPending = false;
+  notifyDrawn();
   toolbarEl = null;
   root.innerHTML = '';
   const pre = document.createElement('pre');
@@ -1019,9 +1054,150 @@ function showError(message: string) {
   root.appendChild(pre);
 }
 
+/** The version of the drawing on screen, as the host sent it; the agent's ids are only good for this one. */
+let drawingKey: DrawingKey | undefined;
+
+function reply(result: AgentResult): void {
+  vscodeApi.postMessage(result);
+}
+
+function agentState(): AgentState {
+  return { loaded: scene !== null, rendering: batchesPending, drawingKey };
+}
+
+function agentScene(): (AgentScene & { pageBounds: (Bounds | null)[] }) | null {
+  if (!scene) return null;
+  return {
+    pageNames: scene.pages.map((page) => page.name),
+    pageIndex: scene.pageIndex,
+    layersOfPage: scene.pages.map((page) => page.layers.map((layer) => layer.name)),
+    hidden: scene.hiddenLayers,
+    objectPages: objects.map((obj) => obj.page),
+    objectLayers: objects.map((obj) => obj.layer),
+    pageBounds: scene.pages.map((page) => page.bounds),
+  };
+}
+
+/** Carries out a ShowPlan on the page; the plan has already been checked against the drawing. */
+function applyShowPlan(plan: Extract<ShowPlan, { ok: true }>): void {
+  if (!scene) return;
+  if (plan.page !== undefined && plan.page !== scene.pageIndex) goToPage(plan.page);
+  if (plan.hiddenLayers) {
+    // In place: batches still waiting for a frame hold this very set.
+    scene.hiddenLayers.clear();
+    for (const name of plan.hiddenLayers) scene.hiddenLayers.add(name);
+    applyLayerVisibility();
+    refreshLayerControl();
+  }
+  if (plan.highlight) {
+    select(plan.highlight, { zoom: true, inspect: plan.highlight.length === 1 });
+  } else if (plan.fit) {
+    clearSelection();
+    if (activeSvg && fittedView) applyViewBox(activeSvg, fittedView);
+    updateStatusBar();
+  }
+}
+
+async function handleAgentShow(req: Extract<AgentRequest, { kind: 'show' }>): Promise<AgentResult> {
+  // A large drawing draws in batches; the first show after opening it waits for them (up to 20 s)
+  // rather than being refused. After the wait the plan checks the drawing version again.
+  await waitUntilDrawn(() => batchesPending, onDrawn, SHOW_DRAWN_WAIT_MS);
+  const view = agentScene();
+  if (!view) return { type: 'AGENT_RESULT', requestId: req.requestId, ok: false, message: NOT_LOADED_MESSAGE };
+  const plan = planShow(agentState(), view, req.key, req.show);
+  if (plan.ok) applyShowPlan(plan);
+  return { type: 'AGENT_RESULT', requestId: req.requestId, ok: plan.ok, message: plan.message };
+}
+
+/** The page drawn off screen, with hidden layers left out; no highlight, no pan and zoom. */
+function renderPageOffscreen(page: DxfPage, hiddenLayers: Set<string>, region?: Bounds): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg') as SVGSVGElement;
+  const flip = document.createElementNS(SVG_NS, 'g');
+  flip.setAttribute('transform', 'scale(1,-1)');
+  const content = document.createElementNS(SVG_NS, 'g');
+  const index = new LayerIndex<SVGElement>();
+  const objIndex = new ObjectIndex<SVGElement>();
+
+  // A region of a big drawing needs only what reaches it: drawing and rasterising all of it takes far longer.
+  const pad = region ? Math.max(region.maxX - region.minX, region.maxY - region.minY) * 0.05 : 0;
+  const reaches = (entity: DxfEntity): boolean => {
+    if (!region) return true;
+    const box = computeBounds([entity]);
+    return (
+      !box ||
+      (box.maxX >= region.minX - pad && box.minX <= region.maxX + pad && box.maxY >= region.minY - pad && box.minY <= region.maxY + pad)
+    );
+  };
+  const visible = (entity: DxfEntity) => !hiddenLayers.has(entity.layer) && reaches(entity);
+  for (const view of page.viewports ?? []) {
+    // Never cull viewport content: it is in model coordinates, the region in sheet coordinates.
+    const shown = { ...view, entities: view.entities.filter((e) => !hiddenLayers.has(e.layer)) };
+    const el = renderViewport(shown, hiddenLayers, index, objIndex);
+    if (el) content.appendChild(el);
+  }
+  for (const entity of page.entities) {
+    if (!visible(entity)) continue;
+    const el = renderEntity(entity);
+    if (el) content.appendChild(el);
+  }
+  flip.appendChild(content);
+  svg.appendChild(flip);
+  return svg;
+}
+
+const SNAPSHOT_SIZE = { width: 1600, height: 1200 };
+
+async function handleAgentSnapshot(req: Extract<AgentRequest, { kind: 'snapshot' }>): Promise<AgentResult> {
+  const view = agentScene();
+  if (!view || !scene) return { type: 'AGENT_RESULT', requestId: req.requestId, ok: false, message: NOT_LOADED_MESSAGE };
+  const plan = planSnapshot(agentState(), view, req.key, req.snapshot);
+  if (!plan.ok) return { type: 'AGENT_RESULT', requestId: req.requestId, ok: false, message: plan.message };
+
+  const svg = renderPageOffscreen(scene.pages[plan.page], scene.hiddenLayers, req.snapshot.region);
+  // A region of the drawing's own proportions would be letterboxed by the 4:3 canvas; widen it so the picture is full.
+  const box = regionViewBox(plan.bounds);
+  const target = SNAPSHOT_SIZE.width / SNAPSHOT_SIZE.height;
+  if (box.w / box.h < target) {
+    const w = box.h * target;
+    box.x -= (w - box.w) / 2;
+    box.w = w;
+  } else {
+    const h = box.w / target;
+    box.y -= (h - box.h) / 2;
+    box.h = h;
+  }
+  applyViewBox(svg, box);
+  const png = await toPngBase64(svg, SNAPSHOT_SIZE);
+  return { type: 'AGENT_RESULT', requestId: req.requestId, ok: true, message: plan.message, png };
+}
+
+/** Answers an agent message exactly once, whatever goes wrong. */
+async function answerAgent(data: unknown): Promise<void> {
+  const parsed = parseAgentMessage(data);
+  if (!parsed) return;
+  if ('invalid' in parsed) {
+    reply({ type: 'AGENT_RESULT', requestId: parsed.invalid.requestId, ok: false, message: parsed.invalid.message });
+    return;
+  }
+  const request = parsed.request;
+  let result: AgentResult;
+  try {
+    result = request.kind === 'show' ? await handleAgentShow(request) : await handleAgentSnapshot(request);
+  } catch (err) {
+    const what = request.kind === 'show' ? 'Show' : 'Snapshot';
+    result = { type: 'AGENT_RESULT', requestId: request.requestId, ok: false, message: `${what} failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  reply(result);
+}
+
 window.addEventListener('message', (event) => {
+  if (typeof event.data !== 'object' || event.data === null) return;
+  if (event.data.type === 'AGENT_SHOW' || event.data.type === 'AGENT_SNAPSHOT') {
+    void answerAgent(event.data);
+    return;
+  }
   const message = event.data as
-    | { type: 'DXF_DATA'; pages: DxfPage[]; skippedEntityTypes: string[]; warnings?: string[]; objects?: ObjectInfo[]; units?: number }
+    | { type: 'DXF_DATA'; pages: DxfPage[]; skippedEntityTypes: string[]; warnings?: string[]; objects?: ObjectInfo[]; units?: number; key?: DrawingKey }
     | { type: 'DXF_ERROR'; message: string }
     | { type: 'DIFF_DATA'; diff: DrawingDiff }
     | { type: 'DXF_PROGRESS'; stage: string };
@@ -1029,6 +1205,8 @@ window.addEventListener('message', (event) => {
   if (message.type === 'DXF_DATA') {
     try {
       renderScene(message.pages, message.skippedEntityTypes, message.warnings, message.objects, message.units);
+      // Only a drawing that rendered has a key the agent may use
+      drawingKey = message.key;
     } catch (err) {
       showError(`Error rendering drawing:\n${describe(err)}`);
     }

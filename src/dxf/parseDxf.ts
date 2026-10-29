@@ -34,6 +34,8 @@ import {
 import AUTO_CAD_COLOR_INDEX from 'dxf-parser/dist/AutoCadColorIndex';
 import { expandBulges } from './bulge';
 import { scanBlockNames } from './blockNames';
+import { HEADER_SNIFF_BYTES, legacyEncodingOf } from '../dwg/encoding';
+import { LegacyFont, decodeTcvn3, legacyFontOf } from './vietnamese';
 import { EntityExtras, Vector3D, scanEntityExtras } from './extras';
 import { scanHatches } from './hatch';
 import {
@@ -54,6 +56,7 @@ import {
   Bounds,
   DxfEntity,
   DxfPage,
+  DimensionInfo,
   LayerInfo,
   ObjectInfo,
   ParsedDxf,
@@ -130,6 +133,10 @@ interface ParseContext {
   layerHandleMap: Record<string, string>;
   /** Text style name → CSS font-family, resolved from STYLE table font filenames. */
   textStyles: Record<string, string>;
+  /** Text style name (upper case) → the font file it names, for telling TCVN3 text apart. */
+  fontFiles: Record<string, string>;
+  /** The single-byte code page the file's text was read with; TCVN3 bytes are recovered through it. Null for Unicode (R2007+) files. */
+  legacyEncoding: string | null;
   /** Extrusion, text style and file position per entity handle. */
   extras: EntityExtras;
   /** Anonymous block name → the block it is a representation of. */
@@ -152,6 +159,8 @@ interface ParseContext {
   visited: number;
   /** Above zero while drawing a dimension's block: its lines annotate, they are not linework. */
   notMeasured: number;
+  /** Every dimension drawn on a page, nested ones included; see recordDimension. */
+  dimensions: DimensionInfo[];
   limitReached: boolean;
 }
 
@@ -329,8 +338,14 @@ const DEFAULT_FONT_FAMILY = "Arial, 'Helvetica Neue', sans-serif";
  * maps that name to a font filename (group code 3). We resolve the filename
  * to a CSS font-family for use in the SVG renderer.
  */
-function scanTextStyles(text: string): Record<string, string> {
+function scanTextStyles(text: string): { fonts: Record<string, string>; fontFiles: Record<string, string> } {
   const result: Record<string, string> = {};
+  const fontFiles: Record<string, string> = {};
+  const save = () => {
+    if (!styleName) return;
+    result[styleName.toUpperCase()] = resolveDxfFont(fontFile);
+    if (fontFile) fontFiles[styleName.toUpperCase()] = fontFile;
+  };
   const lines = text.split(/\r\n|\r|\n/);
   let inStyleTable = false;
   let styleName: string | null = null;
@@ -348,14 +363,12 @@ function scanTextStyles(text: string): Record<string, string> {
       }
     } else if (code === '0' && value === 'ENDTAB') {
       if (inStyleTable) {
-        // Save last style
-        if (styleName) result[styleName.toUpperCase()] = resolveDxfFont(fontFile);
+        save();
         break;
       }
     } else if (inStyleTable) {
       if (code === '0' && value === 'STYLE') {
-        // Save previous style
-        if (styleName) result[styleName.toUpperCase()] = resolveDxfFont(fontFile);
+        save();
         styleName = null;
         fontFile = null;
       } else if (code === '2') {
@@ -366,7 +379,7 @@ function scanTextStyles(text: string): Record<string, string> {
     }
   }
 
-  return result;
+  return { fonts: result, fontFiles };
 }
 
 function resolveDxfFont(fontFile: string | null): string {
@@ -408,7 +421,7 @@ interface RawAttrib {
  * and later layouts live in `*Paper_Space<n>` blocks, title blocks and their
  * sheet titles included.
  */
-function scanAttribs(text: string): RawAttrib[] {
+function scanAttribs(text: string, context: Pick<ParseContext, 'textStyles' | 'fontFiles' | 'legacyEncoding'>): RawAttrib[] {
   const lines = text.split(/\r\n|\r|\n/);
   const attribs: RawAttrib[] = [];
 
@@ -455,7 +468,7 @@ function scanAttribs(text: string): RawAttrib[] {
           if (c === '5') insertHandle = v;
         }
       } else if (value === 'ATTRIB' && scanned) {
-        const attrib = parseAttrib(lines, i + 2, inPaperSpace, insertLayer);
+        const attrib = parseAttrib(lines, i + 2, inPaperSpace, insertLayer, context);
         if (attrib) attribs.push({ ...attrib, insertHandle, insertOrdinal, blockName });
       }
     }
@@ -468,7 +481,8 @@ function parseAttrib(
   lines: string[],
   from: number,
   inPaperSpace: boolean,
-  insertLayer: string
+  insertLayer: string,
+  context: Pick<ParseContext, 'textStyles' | 'fontFiles' | 'legacyEncoding'>
 ): Omit<RawAttrib, 'insertHandle' | 'insertOrdinal'> | null {
   let layer = '0';
   let x = 0, y = 0;
@@ -519,7 +533,7 @@ function parseAttrib(
     // Flag bit 1: an invisible attribute, kept in the file but never drawn.
     hidden: (flags & 1) !== 0,
     position,
-    text: decodeTextValue(textValue),
+    text: decodeTextValue(readLegacy(textValue, legacyFontOfStyle(style, context), context)),
     height,
     rotation,
     inPaperSpace,
@@ -557,6 +571,7 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   const extras = scanEntityExtras(text);
   injectHatches(text, dxf, extras);
 
+  const styles = scanTextStyles(text);
   const context: ParseContext = {
     layers: dxf?.tables?.layer?.layers ?? {},
     blocks: dxf?.blocks ?? {},
@@ -564,7 +579,9 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
     lineTypes: extractLineTypes(dxf),
     layerLineTypes: scanLayerLineTypes(text),
     layerHandleMap: scanLayerHandles(text),
-    textStyles: scanTextStyles(text),
+    textStyles: styles.fonts,
+    fontFiles: styles.fontFiles,
+    legacyEncoding: legacyEncodingOf(text.slice(0, HEADER_SNIFF_BYTES)),
     extras,
     blockNames: scanBlockNames(text),
     trustLayerOffFlags: options.trustLayerOffFlags ?? true,
@@ -576,6 +593,7 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
     emitted: 0,
     visited: 0,
     notMeasured: 0,
+    dimensions: [],
     limitReached: false,
   };
 
@@ -610,7 +628,7 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   // on its INSERT, and drawn as part of it, so clicking a tag selects the door.
   // Without handles (R12), the n-th INSERT of the ENTITIES section owns the
   // attributes that follow it — dxf-parser keeps the file's order.
-  const attribs = scanAttribs(text);
+  const attribs = scanAttribs(text, context);
   const addAttrib = (attrib: RawAttrib, owner: number | undefined, target: DxfEntity[]) => {
     if (owner !== undefined) {
       const attributes = (context.objects[owner].attributes ??= []);
@@ -715,6 +733,7 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
     objects: context.objects,
     skippedEntityTypes: Array.from(context.skippedEntityTypes),
   };
+  if (context.dimensions.length > 0) result.dimensions = context.dimensions;
   const units = readInsertUnits(dxf);
   if (units !== undefined) result.units = units;
   if (context.limitReached) {
@@ -741,7 +760,9 @@ function readInsertUnits(dxf: ReturnType<DxfParser['parseSync']>): number | unde
 }
 
 /** What the search and the inspector show for one top-level entity. */
-function describeObject(raw: IEntity, context: Pick<ParseContext, 'blockNames' | 'blocks'>): ObjectInfo {
+type ObjectContext = Pick<ParseContext, 'blockNames' | 'blocks' | 'extras' | 'textStyles' | 'fontFiles' | 'legacyEncoding'>;
+
+function describeObject(raw: IEntity, context: ObjectContext): ObjectInfo {
   const { blockNames } = context;
   const info: ObjectInfo = { type: raw.type, layer: raw.layer ?? '0', page: 0 };
   // dxf-parser numbers entities that have no handle (R12) itself; only a
@@ -761,19 +782,19 @@ function describeObject(raw: IEntity, context: Pick<ParseContext, 'blockNames' |
     }
     case 'TEXT': {
       const e = raw as ITextEntity;
-      if (e.text) info.text = decodeTextValue(e.text);
+      if (e.text) info.text = decodeTextValue(readLegacy(e.text, textLegacyFont(raw, context), context));
       if (e.startPoint) info.position = { x: e.startPoint.x, y: e.startPoint.y };
       break;
     }
     case 'MTEXT': {
       const e = raw as IMtextEntity;
-      if (e.text) info.text = cleanMtext(e.text);
+      if (e.text) info.text = cleanMtext(e.text, textLegacyFont(raw, context), context.legacyEncoding);
       if (e.position) info.position = { x: e.position.x, y: e.position.y };
       break;
     }
     case 'DIMENSION': {
       const e = raw as IDimensionEntity;
-      info.text = dimensionLabel(e, context.blocks);
+      info.text = dimensionLabel(e, context);
       break;
     }
   }
@@ -1079,6 +1100,7 @@ function collectEntity(
     expandInsert(raw as IInsertEntity, context, transform, { layer, color }, depth, out);
     return;
   }
+  if (raw.type === 'DIMENSION') recordDimension(raw as IDimensionEntity, context, transform, layer);
   if (raw.type === 'DIMENSION' && expandDimension(raw as IDimensionEntity, context, transform, { layer, color }, depth, out)) {
     return;
   }
@@ -1218,6 +1240,28 @@ function expandDimension(
     context.notMeasured--;
   }
   return true;
+}
+
+/**
+ * Lists a dimension so its size can be read without drawing the page, wherever
+ * it sits: inside a block it belongs to the INSERT. Skipped for viewport
+ * collection (the model page already listed it), like recordMeasure.
+ */
+function recordDimension(e: IDimensionEntity, context: ParseContext, transform: Matrix2D, layer: string): void {
+  if (context.keep !== null || context.currentObj === null) return;
+  // The text's middle, else the dimension's anchor (group 10)
+  const at = e.middleOfText ?? e.anchorPoint;
+  const info: DimensionInfo = {
+    obj: context.currentObj,
+    layer,
+    text: dimensionLabel(e, context),
+  };
+  if (at) {
+    const position = applyToPoint(transform, at);
+    info.position = { x: position.x, y: position.y };
+  }
+  if (e.actualMeasurement !== undefined && Number.isFinite(e.actualMeasurement)) info.measurement = e.actualMeasurement;
+  context.dimensions.push(info);
 }
 
 /**
@@ -1478,7 +1522,7 @@ function mapEntity(
     case 'TEXT': {
       const e = raw as ITextEntity;
       if (!e.startPoint || !e.text) return [];
-      const text = decodeTextValue(e.text);
+      const text = decodeTextValue(readLegacy(e.text, textLegacyFont(raw, context), context));
       if (!text) return [];
       const anchor = usesAlignmentPoint(e.halign, e.valign) && e.endPoint ? e.endPoint : e.startPoint;
       const hAlign = textHAlign(e.halign);
@@ -1492,7 +1536,7 @@ function mapEntity(
       if (!e.position || !e.text) return [];
       const { hAlign, vAlign } = mtextAlignment(e.attachmentPoint);
       const font = resolveTextFont(raw, context);
-      return [buildText(layer, color, e.position, cleanMtext(e.text), e.height || 1, mtextRotation(e), m, hAlign, vAlign, font)];
+      return [buildText(layer, color, e.position, cleanMtext(e.text, textLegacyFont(raw, context), context.legacyEncoding), e.height || 1, mtextRotation(e), m, hAlign, vAlign, font)];
     }
 
     case 'DIMENSION': {
@@ -1801,16 +1845,41 @@ function resolveLineweight(raw: IEntity, layer: string, context: ParseContext): 
   return Math.max(0.5, lw / 25);
 }
 
+function textStyleName(raw: IEntity, context: Pick<ParseContext, 'extras'>): string | undefined {
+  // dxf-parser drops group 7, so the style comes from the raw scan by handle.
+  return (
+    (raw.handle !== undefined ? context.extras.style.get(String(raw.handle)) : undefined) ??
+    (raw as any).textStyle ??
+    (raw as any).styleName
+  );
+}
+
+/** The legacy encoding of the font a style names; text with no style uses STANDARD. */
+function legacyFontOfStyle(
+  styleName: string | undefined,
+  context: Pick<ParseContext, 'textStyles' | 'fontFiles'>
+): LegacyFont {
+  // Like resolveTextFont: a style that exists decides, even with no font file of its own.
+  const key = styleName && context.textStyles[styleName.toUpperCase()] ? styleName.toUpperCase() : 'STANDARD';
+  return legacyFontOf(context.fontFiles[key]);
+}
+
+/** Mirrors `resolveTextFont`'s style lookup, but for the font file's encoding. */
+function textLegacyFont(raw: IEntity, context: Pick<ParseContext, 'extras' | 'textStyles' | 'fontFiles'>): LegacyFont {
+  return legacyFontOfStyle(textStyleName(raw, context), context);
+}
+
+/** Text drawn in a TCVN3 font, read as the Vietnamese it stands for. */
+function readLegacy(text: string, font: LegacyFont, context: Pick<ParseContext, 'legacyEncoding'>): string {
+  return font && context.legacyEncoding ? decodeTcvn3(text, font === 'tcvn3-caps', context.legacyEncoding) : text;
+}
+
 /**
  * Resolves the CSS font-family for a text entity: its own style (group 7), or
  * STANDARD when it names none.
  */
 function resolveTextFont(raw: IEntity, context: ParseContext): string | undefined {
-  // dxf-parser drops group 7, so the style comes from the raw scan by handle.
-  const styleName =
-    (raw.handle !== undefined ? context.extras.style.get(String(raw.handle)) : undefined) ??
-    (raw as any).textStyle ??
-    (raw as any).styleName;
+  const styleName = textStyleName(raw, context);
   if (styleName) {
     const font = context.textStyles[styleName.toUpperCase()];
     if (font) return font;
@@ -1833,13 +1902,23 @@ function toHexColor(truecolor: number): string {
  * - codes whose argument runs to a semicolon: `\f \H \C \S` …
  * - escapes standing for a character: `\P \N \~ \\ \{ \}` and `\U+XXXX`.
  */
-function cleanMtext(raw: string): string {
+function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith: string | null = 'latin1'): string {
   let out = '';
+  // `\f` switches the font until the `{}` scope it sits in ends.
+  let font = baseFont;
+  const scopes: LegacyFont[] = [];
   for (let i = 0; i < raw.length; i++) {
     const ch = raw[i];
-    if (ch === '{' || ch === '}') continue;
+    if (ch === '{') {
+      scopes.push(font);
+      continue;
+    }
+    if (ch === '}') {
+      if (scopes.length > 0) font = scopes.pop()!;
+      continue;
+    }
     if (ch !== '\\' || i + 1 >= raw.length) {
-      out += ch;
+      out += font && decodedWith ? decodeTcvn3(ch, font === 'tcvn3-caps', decodedWith) : ch;
       continue;
     }
 
@@ -1884,6 +1963,7 @@ function cleanMtext(raw: string): string {
         // Formatting codes with an argument (\f, \H, \W, \Q, \T, \A, \C, \c, \p …)
         if (/[A-Za-z]/.test(code)) {
           const end = raw.indexOf(';', i + 1);
+          if (code === 'f' || code === 'F') font = legacyFontOf(raw.slice(i + 1, end < 0 ? raw.length : end).split('|')[0]);
           i = end < 0 ? raw.length : end;
         } else {
           out += code;
@@ -1944,11 +2024,12 @@ function decodePercentCodes(raw: string): string {
  * the formatted text — `3'-6"` for an imperial 42, `5300` with the style's
  * precision — which the raw measurement cannot reproduce without DIMSTYLE.
  */
-function dimensionLabel(e: IDimensionEntity, blocks: Record<string, IBlock>): string {
+function dimensionLabel(e: IDimensionEntity, context: ObjectContext): string {
   // Tolerances and alternate units are texts of their own; read them all.
-  const parts = ((e.block ? blocks[e.block]?.entities : undefined) ?? []).map((child) => {
-    if (child.type === 'MTEXT') return cleanMtext((child as IMtextEntity).text ?? '');
-    if (child.type === 'TEXT') return decodeTextValue((child as ITextEntity).text ?? '');
+  const parts = ((e.block ? context.blocks[e.block]?.entities : undefined) ?? []).map((child) => {
+    const font = textLegacyFont(child, context);
+    if (child.type === 'MTEXT') return cleanMtext((child as IMtextEntity).text ?? '', font, context.legacyEncoding);
+    if (child.type === 'TEXT') return decodeTextValue(readLegacy((child as ITextEntity).text ?? '', font, context));
     return '';
   });
   return parts.filter(Boolean).join(' ') || formatDimensionText(e);

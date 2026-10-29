@@ -1,77 +1,26 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { webviewHtml } from './webviewHtml';
-import { LruCache, debounce } from './dwg/cache';
-import type { DrawingWorker } from './dwg/workerClient';
-import type { ParsedDxf } from './shared/types';
-
-/** Parsed results keyed by file path, valid while the file's mtime is unchanged. */
-interface CacheEntry {
-  mtime: number;
-  parsed: ParsedDxf;
-}
-
-/** A few recent drawings, so reopening a tab is instant without keeping every drawing ever opened. */
-const parseCache = new LruCache<string, CacheEntry>(4);
-
-/**
- * Conversions under way, so two panels on one file share the work, each still
- * hearing about progress. Keyed by path + mtime.
- */
-const inFlight = new Map<string, { result: Promise<ParsedDxf>; listeners: Set<Progress> }>();
+import { debounce } from './dwg/cache';
+import * as fs from 'fs';
+import type { DrawingStore } from './ai/drawingStore';
+import type { PreviewBridge } from './ai/previewBridge';
+import type { DrawingKey } from './shared/types';
+import { previewSource } from './previewSource';
 
 /** CAD software writes a file in several steps; wait for it to settle before re-reading. */
 const RELOAD_DEBOUNCE_MS = 300;
-
-type Progress = (stage: 'reading' | 'converting' | 'parsing') => void;
-
-async function loadDrawing(
-  worker: DrawingWorker,
-  uri: vscode.Uri,
-  mtime: number,
-  progress: Progress
-): Promise<ParsedDxf> {
-  const filePath = uri.fsPath;
-  const cached = parseCache.get(filePath);
-  if (cached && cached.mtime === mtime) return cached.parsed;
-
-  const key = `${filePath}\0${mtime}`;
-  let pending = inFlight.get(key);
-  if (pending) {
-    pending.listeners.add(progress);
-  } else {
-    const listeners = new Set<Progress>([progress]);
-    const result = convertAndParse(worker, uri, (stage) => listeners.forEach((listener) => listener(stage))).then(
-      (parsed) => {
-        parseCache.set(filePath, { mtime, parsed });
-        return parsed;
-      }
-    );
-    result.finally(() => inFlight.delete(key)).catch(() => {});
-    pending = { result, listeners };
-    inFlight.set(key, pending);
-  }
-  try {
-    return await pending.result;
-  } finally {
-    pending.listeners.delete(progress);
-  }
-}
-
-async function convertAndParse(worker: DrawingWorker, uri: vscode.Uri, progress: Progress): Promise<ParsedDxf> {
-  progress('reading');
-  const bytes = await vscode.workspace.fs.readFile(uri);
-  const converterPath = vscode.workspace.getConfiguration('dwgPreviewer').get<string>('converterPath', '');
-  // Conversion and parsing run on a worker thread, off the extension host's.
-  return worker.run(bytes, uri.fsPath, converterPath, progress);
-}
 
 export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
   public static readonly viewType = 'dwgPreviewer.dwgView';
 
   constructor(
     private readonly context: vscode.ExtensionContext,
-    private readonly worker: DrawingWorker
+    /** Drawings on disk (`file:`), shared with the AI side. */
+    private readonly store: DrawingStore,
+    /** Any other scheme: read through `vscode.workspace.fs`, memory only, never disk-cached. */
+    private readonly memoryStore: DrawingStore,
+    private readonly bridge?: PreviewBridge
   ) {}
 
   openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
@@ -85,9 +34,30 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
     webviewPanel.webview.options = { enableScripts: true };
     webviewPanel.webview.html = webviewHtml(webviewPanel.webview, this.context.extensionUri);
 
+    const source = previewSource(document.uri, realPath);
+    /** `file:` — one canonical path for the store, the bridge and the agent's keys, so a symlink matches. */
+    const key = source.kind === 'file' ? source.path : source.key;
+    const store = source.kind === 'file' ? this.store : this.memoryStore;
+    /** Only a drawing on disk is offered to an agent; a `git:` revision or a virtual file is not. */
+    const bridge = source.kind === 'file' ? this.bridge : undefined;
     /** Bumped per load; a slower, older load must not overwrite a newer one. */
     let generation = 0;
     let disposed = false;
+    /** The version of the drawing this panel was last sent; what the agent's ids refer to. */
+    let lastKey: DrawingKey | undefined;
+    const registration = bridge?.register(
+      key,
+      {
+        postMessage: (m) => webviewPanel.webview.postMessage(m),
+        reveal: () => webviewPanel.reveal(undefined, true),
+        get active() {
+          return webviewPanel.active;
+        },
+        get visible() {
+          return webviewPanel.visible;
+        },
+      },
+      () => lastKey);
 
     const post = (run: number, message: unknown) => {
       if (!disposed && run === generation) void webviewPanel.webview.postMessage(message);
@@ -96,16 +66,18 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const sendContent = async () => {
       const run = ++generation;
       try {
-        const stat = await vscode.workspace.fs.stat(document.uri);
-        const parsed = await loadDrawing(this.worker, document.uri, stat.mtime, (stage) =>
-          post(run, { type: 'DXF_PROGRESS', stage })
-        );
-        post(run, { type: 'DXF_DATA', ...parsed });
-      } catch (err) {
-        post(run, {
-          type: 'DXF_ERROR',
-          message: err instanceof Error ? err.message : String(err),
+        const { key: drawingKey, parsed } = await store.get(key, {
+          progress: (stage) => post(run, { type: 'DXF_PROGRESS', stage }),
         });
+        post(run, { type: 'DXF_DATA', key: drawingKey, ...parsed });
+        if (!disposed && run === generation) {
+          lastKey = drawingKey;
+          registration?.loaded();
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!disposed && run === generation) registration?.failed(message);
+        post(run, { type: 'DXF_ERROR', message });
       }
     };
 
@@ -116,6 +88,8 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
       webviewPanel.webview.onDidReceiveMessage((message) => {
         if (message?.type === 'READY') {
           void sendContent();
+        } else if (message?.type === 'AGENT_RESULT') {
+          bridge?.receive(message);
         } else if (message?.type === 'EXPORT') {
           if ((message.format === 'svg' || message.format === 'png' || message.format === 'csv') && typeof message.data === 'string') {
             void this.saveExport(document.uri, message.format, message.data);
@@ -139,11 +113,12 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
       watcher,
       watcher.onDidChange(() => reload()),
       watcher.onDidCreate(() => reload()),
-      watcher.onDidDelete(() => parseCache.delete(document.uri.fsPath))
+      watcher.onDidDelete(() => store.forget(key))
     );
 
     webviewPanel.onDidDispose(() => {
       disposed = true;
+      registration?.dispose();
       reload.cancel();
       for (const subscription of subscriptions) subscription.dispose();
     });
@@ -167,5 +142,14 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
         `Failed to write file: ${err instanceof Error ? err.message : String(err)}`
       );
     }
+  }
+}
+
+/** The tools match on real paths, so a symlinked workspace still finds its panel. */
+function realPath(p: string): string {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return p;
   }
 }

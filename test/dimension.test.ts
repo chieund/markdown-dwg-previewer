@@ -131,3 +131,90 @@ test('a dimension with a tolerance reads as all of its text', () => {
   const [dimension] = parseDxf(text).objects;
   assert.equal(dimension.text, '5300 +5');
 });
+
+const dimensionRecord = (extra: string[] = [], text = '') =>
+  [
+    '0', 'DIMENSION', '8', 'DIMS', '2', '*D1', '10', '0', '20', '0', '30', '0',
+    '11', '950', '21', '2650', '31', '0', '70', '33', ...(text ? ['1', text] : []), '42', '5300', ...extra,
+  ];
+
+test('a dimension inside a block is listed against its INSERT', () => {
+  const text = dxf(
+    '0', 'SECTION', '2', 'BLOCKS',
+    '0', 'BLOCK', '2', 'ELEV', '70', '0', '10', '0', '20', '0', '30', '0',
+    '0', 'LINE', '8', '0', '10', '0', '20', '0', '30', '0', '11', '1', '21', '0', '31', '0',
+    ...dimensionRecord(),
+    '0', 'ENDBLK',
+    '0', 'BLOCK', '2', '*D1', '70', '1', '10', '0', '20', '0', '30', '0',
+    '0', 'MTEXT', '8', '0', '10', '950', '20', '2650', '30', '0', '40', '300', '1', '5300',
+    '0', 'ENDBLK', '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'LINE', '8', '0', '10', '0', '20', '0', '30', '0', '11', '1', '21', '1', '31', '0',
+    '0', 'INSERT', '8', '0', '2', 'ELEV', '10', '100', '20', '0', '30', '0', '41', '2', '42', '2', '43', '2',
+    '0', 'ENDSEC', '0', 'EOF'
+  );
+  const parsed = parseDxf(text);
+  assert.equal(parsed.dimensions?.length, 1);
+  const [info] = parsed.dimensions!;
+  assert.equal(info.obj, 1, 'the INSERT, not the dimension');
+  assert.equal(info.text, '5300');
+  assert.equal(info.layer, 'DIMS');
+  assert.equal(info.position?.x, 100 + 2 * 950);
+  assert.equal(info.position?.y, 2 * 2650);
+});
+
+test('top-level dimensions are listed with their own object', () => {
+  const parsed = parseDxf(verticalDimension());
+  assert.equal(parsed.dimensions?.length, 1);
+  const [info] = parsed.dimensions!;
+  assert.equal(info.obj, 0);
+  assert.equal(info.text, parsed.objects[0].text, 'the list and the object never disagree');
+  assert.deepEqual(info.position, { x: 950, y: 2650 });
+});
+
+test('viewport collection adds no dimensions', () => {
+  const text = dxf(
+    '0', 'SECTION', '2', 'ENTITIES',
+    ...dimensionRecord(),
+    '0', 'LINE', '67', '1', '8', 'BORDER', '10', '0', '20', '0', '30', '0', '11', '100', '21', '0', '31', '0',
+    '0', 'VIEWPORT', '67', '1', '8', '0', '10', '50', '20', '50', '30', '0', '40', '20', '41', '20',
+    '68', '1', '69', '2', '12', '950', '22', '2650', '45', '10',
+    '0', 'ENDSEC', '0', 'EOF'
+  );
+  const parsed = parseDxf(text);
+  assert.equal(parsed.pages[1].viewports?.length, 1, 'the viewport shows the dimension');
+  assert.equal(parsed.dimensions?.length, 1, 'but it is listed once, from the model');
+});
+
+test('measurement is kept beside an overridden text', () => {
+  const text = dxf(
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'DIMENSION', '8', 'DIMS', '10', '0', '20', '0', '30', '0',
+    '11', '5', '21', '5', '31', '0', '70', '32', '1', 'L=25m', '42', '25000',
+    '0', 'ENDSEC', '0', 'EOF'
+  );
+  const [info] = parseDxf(text).dimensions!;
+  assert.equal(info.text, 'L=25m');
+  assert.equal(info.measurement, 25000);
+});
+
+test('a dimension without a text position uses its anchor point', () => {
+  const text = dxf(
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'DIMENSION', '8', 'DIMS', '10', '40', '20', '60', '30', '0', '70', '32', '42', '120',
+    '0', 'ENDSEC', '0', 'EOF'
+  );
+  const [info] = parseDxf(text).dimensions!;
+  assert.deepEqual(info.position, { x: 40, y: 60 });
+});
+
+test('a dimension with no position at all is still listed', () => {
+  const text = dxf(
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'DIMENSION', '8', 'DIMS', '70', '32', '42', '120',
+    '0', 'ENDSEC', '0', 'EOF'
+  );
+  const [info] = parseDxf(text).dimensions!;
+  assert.equal(info.measurement, 120);
+  assert.equal(info.position, undefined);
+});

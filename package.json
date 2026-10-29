@@ -2,7 +2,7 @@
   "name": "dwg-previewer",
   "displayName": "AutoCAD DWG & DXF Previewer",
   "description": "View AutoCAD DWG and DXF drawings inside VS Code — no AutoCAD needed. Open .dwg and .dxf files instantly with pan, zoom, layer control and SVG/PNG export.",
-  "version": "1.2.1",
+  "version": "1.3.1",
   "publisher": "bumkom",
   "license": "GPL-3.0-or-later",
   "icon": "icon.png",
@@ -21,7 +21,16 @@
     "2d",
     "viewer",
     "architecture",
-    "engineering"
+    "engineering",
+    "autocad viewer",
+    "dwg reader",
+    "open dwg without autocad",
+    "quantity takeoff",
+    "cad diff",
+    "mcp",
+    "ai",
+    "claude",
+    "copilot"
   ],
   "sponsor": {
     "url": "https://buymeacoffee.com/bumkom"
@@ -34,9 +43,12 @@
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Visualization"
+    "Visualization",
+    "AI"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
@@ -71,6 +83,17 @@
           "default": "",
           "description": "Path to dwg2dxf or ODAFileConverter executable. Leave empty to use the bundled WASM converter. Can only be set in user settings — a workspace cannot choose a program for this extension to run.",
           "scope": "machine"
+        },
+        "dwgPreviewer.ai.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Let AI agents in VS Code (Claude Code, Copilot, Kiro) read drawings through a local MCP server."
+        },
+        "dwgPreviewer.ai.port": {
+          "type": "number",
+          "default": 45131,
+          "description": "Local port of the MCP server that AI agents connect to.",
+          "scope": "machine"
         }
       }
     },
@@ -89,6 +112,16 @@
       {
         "command": "dwgPreviewer.compareSelected",
         "title": "Compare Selected Drawings",
+        "category": "DWG"
+      },
+      {
+        "command": "dwgPreviewer.clearDrawingCache",
+        "title": "Clear Drawing Cache",
+        "category": "DWG"
+      },
+      {
+        "command": "dwgPreviewer.connectAgents",
+        "title": "Connect AI Agents…",
         "category": "DWG"
       }
     ],
@@ -142,7 +175,13 @@
           "when": "false"
         }
       ]
-    }
+    },
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "dwgPreviewer.mcp",
+        "label": "DWG Previewer"
+      }
+    ]
   },
   "scripts": {
     "build": "node esbuild.js",
@@ -156,7 +195,8 @@
     "preview": "node esbuild.js && node esbuild.js --preview && node out-test/preview.js"
   },
   "dependencies": {
-    "@mlightcad/libredwg-web": "^0.7.14"
+    "@mlightcad/libredwg-web": "^0.7.14",
+    "@modelcontextprotocol/sdk": "1.32.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
@@ -165,5 +205,8 @@
     "dxf-parser": "^1.1.2",
     "esbuild": "^0.24.0",
     "typescript": "^5.5.0"
+  },
+  "overrides": {
+    "fast-uri": "3.1.9"
   }
 }
