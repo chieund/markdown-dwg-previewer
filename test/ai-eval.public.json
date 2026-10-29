@@ -1,0 +1,59 @@
+[
+  {
+    "drawing": "AEC Plan Elev Sample.dxf",
+    "question": "How many DOOR blocks (inserts of the block named DOOR) does the drawing contain?",
+    "expect": [
+      "57"
+    ],
+    "forbid": [
+      "56",
+      "58"
+    ],
+    "source": "dwg_overview blocks.DOOR = 57"
+  },
+  {
+    "drawing": "AEC Plan Elev Sample.dxf",
+    "question": "How many WIN6 blocks (inserts of the block named WIN6) does the drawing contain?",
+    "expect": [
+      "35"
+    ],
+    "forbid": [
+      "34",
+      "36"
+    ],
+    "source": "dwg_overview blocks.WIN6 = 35; dwg_find_text WIN6 totalMatches 35, all INSERT/WIN6 on Model Space (ids 598, 599, 4066, ...)"
+  },
+  {
+    "drawing": "AEC Plan Elev Sample.dxf",
+    "question": "Is there a room label LOBBY? If so, give its position (x and y in drawing units).",
+    "expect": [
+      "-918.95|-919|-918.9",
+      "218.2|218"
+    ],
+    "forbid": [
+      "not found"
+    ],
+    "source": "dwg_find_text LOBBY: TEXT id 83, Model Space, center (-918.95, 218.2)"
+  },
+  {
+    "drawing": "AEC Plan Elev Sample.dxf",
+    "question": "What is the longest overall horizontal dimension drafted on the Model Space page, as displayed (feet-inches)? Give the exact drafted text.",
+    "expect": [
+      "175'-0|175 ft|175 feet"
+    ],
+    "forbid": [
+      "174'-0",
+      "176'-0"
+    ],
+    "source": "dwg_dimensions id 400: value 175'-0\", measurement 2100, horizontal, Model Space (valueCounts 175'-0\" x2)"
+  },
+  {
+    "drawing": "AEC Plan Elev Sample.dxf",
+    "question": "Does the drawing declare its units? Answer yes or no and say which.",
+    "expect": [
+      "not declare|no units|undeclared"
+    ],
+    "forbid": [],
+    "source": "dwg_overview units = NOT DECLARED"
+  }
+]

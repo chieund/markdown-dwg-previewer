@@ -10,7 +10,7 @@
  */
 
 /** Enough to reach `$ACADVER` and `$DWGCODEPAGE`, which open the header. */
-const HEADER_SNIFF_BYTES = 64 * 1024;
+export const HEADER_SNIFF_BYTES = 64 * 1024;
 
 const CODE_PAGES: Record<string, string> = {
   ANSI_874: 'windows-874',
@@ -45,13 +45,24 @@ export function decodeDxfBuffer(buffer: Uint8Array): string {
   const version = headerValue(head, '$ACADVER');
   if (version && version >= 'AC1021') return new TextDecoder('utf-8').decode(body);
 
-  const codepage = headerValue(head, '$DWGCODEPAGE')?.toUpperCase();
-  const encoding = (codepage && CODE_PAGES[codepage]) || 'windows-1252';
+  const encoding = legacyEncodingOf(head);
   try {
     return new TextDecoder(encoding).decode(body);
   } catch {
     return new TextDecoder('windows-1252').decode(body);
   }
+}
+
+/**
+ * The single-byte label `decodeDxfBuffer` reads a file with, from its header
+ * text: the code page it declares, or `'latin1'` for R2007+ files, whose text
+ * is UTF-8 and so has no code page to map characters back to bytes.
+ */
+export function legacyEncodingOf(dxfHead: string): string {
+  const version = headerValue(dxfHead, '$ACADVER');
+  if (version && version >= 'AC1021') return 'latin1';
+  const codepage = headerValue(dxfHead, '$DWGCODEPAGE')?.toUpperCase();
+  return (codepage && CODE_PAGES[codepage]) || 'windows-1252';
 }
 
 /** Value of a header variable: `9 / $NAME / <code> / <value>`. */

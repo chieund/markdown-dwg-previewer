@@ -184,7 +184,7 @@ function interactionScript(action: string | undefined): string {
   return '';
 }
 
-function buildHtml(message: object, action?: string): string {
+function buildHtml(message: object, action?: string, agentMessage?: object): string {
   const bundle = fs.readFileSync(path.resolve(__dirname, '..', 'out', 'webview', 'main.js'), 'utf-8');
   const payload = JSON.stringify(message)
     .replace(/</g, '\\u003c')
@@ -203,20 +203,48 @@ function buildHtml(message: object, action?: string): string {
   // The webview talks to the extension host through this bridge; nothing is
   // listening here, so the calls are simply recorded.
   const sent = [];
-  window.acquireVsCodeApi = () => ({ postMessage: (m) => sent.push(m) });
+  window.acquireVsCodeApi = () => ({ postMessage: (m) => {
+    sent.push(m);
+    if (m.type === 'AGENT_RESULT') {
+      // Show what the agent would get back: the text on the page title, the PNG on the page for the harness to dump
+      document.title = 'agent:' + m.ok + ':' + m.message;
+      m.ms = Math.round(performance.now() - window.__agentStart);
+      const out = document.createElement('pre');
+      out.id = 'agent-result';
+      out.hidden = true;
+      out.textContent = JSON.stringify(m);
+      document.body.appendChild(out);
+    }
+  } });
 </script>
 <script>${bundle}</script>
 <script>
   window.postMessage(${payload}, '*');
   setTimeout(() => { ${interactionScript(action)} }, 300);
+  ${agentMessage ? `setTimeout(() => { window.__agentStart = performance.now(); window.postMessage(${JSON.stringify(agentMessage)
+    .replace(/</g, '\\u003c')}, '*'); }, 600);` : ''}
 </script>
 </body>
 </html>`;
 }
 
+/** `centre: 0.06` stands for a region of that fraction of the page's size around its middle. */
+function resolveCentreRegion(request: { page: number; centre?: number; region?: object }, pages: { bounds: { minX: number; minY: number; maxX: number; maxY: number } | null }[]): object {
+  const { centre, ...rest } = request;
+  const b = pages[request.page]?.bounds;
+  if (centre === undefined || !b) return rest;
+  const cx = (b.minX + b.maxX) / 2;
+  const cy = (b.minY + b.maxY) / 2;
+  const w = ((b.maxX - b.minX) * centre) / 2;
+  const h = ((b.maxY - b.minY) * centre) / 2;
+  return { ...rest, region: { minX: cx - w, maxX: cx + w, minY: cy - h, maxY: cy + h } };
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const action = args.find((a) => a.startsWith('--'))?.slice(2);
+  const agentShow = args.find((a) => a.startsWith('--agent-show='))?.slice('--agent-show='.length);
+  const agentSnapshot = args.find((a) => a.startsWith('--agent-snapshot='))?.slice('--agent-snapshot='.length);
+  const action = args.find((a) => a.startsWith('--') && !a.startsWith('--agent-'))?.slice(2);
   const [source, outDirArg] = args.filter((a) => !a.startsWith('--'));
   if (!source) {
     console.error('Missing file.\n  npm run preview -- <file.dwg|file.dxf> [output-folder]');
@@ -245,7 +273,9 @@ async function main(): Promise<void> {
   fs.mkdirSync(stageDir, { recursive: true });
   const tmpHtml = path.join(stageDir, `${name}.html`);
   // --diff=<older file>: render the comparison of that file (old) against this one (new)
-  let message: object = { type: 'DXF_DATA', ...parsed };
+  // The key the agent messages must carry; the real host gets it from the drawing store
+  const key = { path: path.resolve(source), mtimeMs: 1, size: 1 };
+  let message: object = { type: 'DXF_DATA', key, ...parsed };
   if (action?.startsWith('diff=')) {
     // diff=<older file>[#n][@page]: optionally open a page and press F7 n times
     const olderPath = action.slice('diff='.length).split(/[#@]/)[0];
@@ -256,13 +286,46 @@ async function main(): Promise<void> {
   }
   const diffSteps = action?.startsWith('diff=') ? Number(action.match(/#(\d+)/)?.[1] ?? 0) : 0;
   const diffPage = action?.startsWith('diff=') ? Number(action.match(/@(\d+)/)?.[1] ?? -1) : -1;
-  fs.writeFileSync(tmpHtml, buildHtml(message, action?.startsWith('diff=') ? `steps=${diffSteps}@${diffPage}` : action), 'utf-8');
+  const agentMessage = agentShow
+    ? { type: 'AGENT_SHOW', requestId: 'preview', key, ...JSON.parse(agentShow) }
+    : agentSnapshot
+      ? { type: 'AGENT_SNAPSHOT', requestId: 'preview', key, ...resolveCentreRegion(JSON.parse(agentSnapshot), parsed.pages) }
+      : undefined;
+  fs.writeFileSync(
+    tmpHtml,
+    buildHtml(message, action?.startsWith('diff=') ? `steps=${diffSteps}@${diffPage}` : action, agentMessage),
+    'utf-8'
+  );
 
   // Actions can carry a path (diff=…); keep the file name flat
   const suffix = action
     ? '-' + (action.startsWith('diff=') ? `diff${action.replace(/^[^#@]*/, '').replace(/[#@]/g, '-')}` : action.replace(/[^a-z0-9=#,.]+/gi, '-'))
     : '';
   const target = path.join(outDir, `preview-${name}${suffix}.png`);
+
+  if (agentSnapshot) {
+    // A snapshot has no screen of its own: dump the page and take the PNG out of the reply
+    const started = Date.now();
+    const dom = execFileSync(
+      findBrowser(),
+      ['--headless', '--disable-gpu', '--no-sandbox', `--window-size=${WIDTH},${HEIGHT}`, `--virtual-time-budget=${process.env.AGENT_BUDGET ?? 20000}`, '--dump-dom', pathToFileURL(tmpHtml).href],
+      { stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 }
+    ).toString();
+    fs.rmSync(tmpHtml, { force: true });
+    const raw = dom.match(/<pre id="agent-result"[^>]*>([\s\S]*?)<\/pre>/)?.[1];
+    if (!raw) {
+      fs.writeFileSync(path.join(outDir, 'agent-dom.html'), dom);
+      throw new Error('The webview sent no AGENT_RESULT; DOM saved to agent-dom.html.');
+    }
+    const result = JSON.parse(raw.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
+    console.log(`  agent: ok=${result.ok} "${result.message}" (webview ${result.ms} ms, whole run ${Date.now() - started} ms)`);
+    if (result.png) {
+      const png = path.join(outDir, `agent-snapshot-${name}.png`);
+      fs.writeFileSync(png, Buffer.from(result.png, 'base64'));
+      console.log(`  image: ${path.relative(process.cwd(), png)}`);
+    }
+    return;
+  }
 
   execFileSync(
     findBrowser(),

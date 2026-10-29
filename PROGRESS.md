@@ -1,10 +1,64 @@
 # DWG Previewer — Development Progress
 
-**Last updated:** 2026-10-08
+**Last updated:** 2026-10-29
 
-**Status:** v1.2.0 is live on the Marketplace (431 installs, ~4★ from 2 ratings, checked 2026-10-08). v1.2.1 packaged (`dwg-previewer-1.2.1.vsix`), not yet published. Since 1.2.0: dimensions drawn in full; libredwg-web 0.7.14; unsupported entities named; corpus widened to 23 public drawings; UI review (docked Quantities, export without units, dynamic block names fixed). 273 unit tests, typecheck clean.
+**Status:** v1.3.0 prepared on `feat/add-mcp` (not published). v1.2.0 is live on the Marketplace (431 installs, ~4★ from 2 ratings, checked 2026-10-08). 429 unit tests, typecheck clean.
 
-**Opens:** `.dwg` and `.dxf` · **273 unit tests** · **corpus 23/23** public + 3/3 private (2026-10-08) · 91 sample drawings parse cleanly · typecheck clean
+**Opens:** `.dwg` and `.dxf` · **429 unit tests** · **corpus 23/23** public + 3/3 private (2026-10-08) · 91 sample drawings parse cleanly · typecheck clean
+
+---
+
+## 🤖 AI drawing reader (2026-10-29, branch `feat/add-mcp`)
+
+An MCP server inside the extension (127.0.0.1:45131, bearer token) lets AI agents read the open drawing. On by default (`dwgPreviewer.ai.enabled`).
+
+**Built**
+1. TCVN3 Vietnamese text (`.Vn*` fonts) decoded to Unicode in the parser
+2. Dimension list with nested dimensions
+3. Drawing store: read-once memory cache + AI-only disk cache
+4. Drawing index and the five tools: `dwg_overview`, `dwg_find_text`, `dwg_dimensions`, `dwg_snapshot`, `dwg_show`
+5. File-access rule: workspace folders / open previews free, others need a modal Allow
+6. HTTP MCP server with standby (a second window takes over when the first closes)
+7. Webview agent channel: show (highlight / zoom) and snapshot
+8. Preview bridge: opens/loads the drawing and routes agent requests to the panel
+9. Extension wiring: Copilot MCP provider (VS Code ≥ 1.101), settings, cache clearing, `ai.enabled` off writes nothing
+10. "DWG: Connect AI Agents…" — Claude Code via `claude mcp add`, copy URL / header for other agents, first-open prompt
+11. Evaluation harness: `node esbuild.js --ai-eval && node out-test/aiEval.js <questions.json>`
+12. Docs and cleanup (README, MARKETPLACE, this file; spike removed)
+13. Final review fixes: `git:` / virtual-file previews read through VS Code again (memory only, never offered to agents); lazy start (server and keyring only for users who connected or used AI, else on first drawing / Connect / Copilot); first-open prompt only when Claude Code is installed; port occupant proven by HMAC identity check (another program → warned once, AI off, still retrying); server registered as `dwg-previewer`; Windows `where $PATH:claude`; access prompt 60 s timeout; Clear Drawing Cache works with AI off; `dwg_show` waits for batch drawing; tool errors are `isError`; licence notices for every bundled package
+
+**Eval results**
+- Private set: 12 PASS / 4 CHECK. All CHECKs explained: 2 were format mismatches (fixed since in the matcher); 3 were correct answers that cited stale values the drawing itself contains (forbids removed since). No wrong numbers.
+- Public set: 4 PASS / 1 CHECK (format, fixed). No wrong numbers.
+
+**Bundle size:** `out/extension.js` 757 KB with the MCP SDK (about 13x larger than before).
+
+**Kiro:** not verified. The "other agents" setup shows URL and header only; Kiro's config format was never tried.
+
+### Before release
+- [ ] 1. Owner manual checks on the packaged build:
+  - [ ] Output "DWG Previewer" shows `AI server serving on http://127.0.0.1:45131/mcp`
+  - [ ] Second window logs "standing by: another DWG Previewer window serves port 45131"; close the first, the second logs "serving" within ~5 s
+  - [ ] Another program on the port (e.g. `python3 -m http.server 45131 --bind 127.0.0.1`): one warning "Port 45131 is used by another program…", Connect refuses; stop it and the server serves within ~5 s
+  - [ ] Fresh profile that never used AI: nothing in the log about the AI server until a drawing is opened; then "Starting the AI server on first use"
+  - [ ] Source Control diff of a changed drawing: the left (HEAD) side shows the old drawing, not the working file
+  - [ ] Copilot Chat agent mode lists the five tools; "how many doors in the AEC sample?" answers 57; `dwg_show` highlights in the preview
+  - [ ] Modal "Allow the AI agent to read ..." appears for a file outside the workspace / open previews; Deny and dismiss both refuse
+  - [ ] `dwgPreviewer.ai.enabled` false: server stops (log), nothing new in globalStorage `drawing-cache/` or `ai-windows/`; "Clear Drawing Cache" still removes the folder and says "Removed N cached drawings."; re-enable restarts
+  - [ ] Change `ai.port`: restarts on the new port, Claude Code registration follows
+  - [ ] Remove the old test registration once by hand: `claude mcp remove --scope user dwg` (the name is `dwg-previewer` now)
+  - [ ] Connect: `claude mcp list` shows `dwg-previewer` (http); Disconnect: it is gone
+  - [ ] A new Claude Code conversation answers a question from the private question set (outside the repo)
+  - [ ] Remote-window message
+  - [ ] Kiro: "Show setup for other agents" values work (`mcpServers["dwg-previewer"].url` / `headers`; format unverified)
+- [ ] 2. Run the eval once more on both sets (the private question set stays outside the repo); expect no CHECK.
+
+### 1.3.0 changelog
+- AI drawing reader: an MCP server inside the extension; Claude Code via "DWG: Connect AI Agents…"; Copilot on VS Code 1.101+
+- Vietnamese TCVN3 text (`.Vn*` fonts) shows correctly in the preview
+- Dimension list, including nested dimensions
+- Preview fix for non-file schemes (`git:`, virtual files)
+- Also: the port identity proof is bound to the port; opening a drawing no longer makes the AI server start with VS Code (only Connect, setup or Copilot do); transitive `fast-uri` pinned to 3.1.9 (`overrides`)
 
 ---
 
@@ -365,11 +419,11 @@ Marketplace screenshots `marketplace-quantities/locate/find.png` regenerated (th
 - **Public set, `test/corpus-baseline.json` — 23 drawings:** the 17 AutoCAD samples, Autodesk's
   *AEC Plan Elev Sample* (142 mirrored entities), the Google-Drive viewer's sample models
   (Bracket, Canteen, GridElevation, Map_Of_UAE) and a bridge drawing.
-- **Client drawings keep their baseline outside the repo** (`--baseline=` next to the drawings): the
+- **Private drawings keep their baseline outside the repo** (`--baseline=` next to the drawings): the
   file names identify a client's project and the baseline here is public.
 - **Extents catch what counts cannot.** Mutation check — dropping the INSERT extrusion
   (mirrored blocks back on the wrong side): AEC loses 179 viewport entities, and Canteen and
-  GridElevation report *extents moved*. The 3 client drawings did **not** flag it: their mirrored
+  GridElevation report *extents moved*. The 3 private drawings did **not** flag it: their mirrored
   blocks stay inside the sheet frame. Screenshots remain the check for those.
 
 Findings:

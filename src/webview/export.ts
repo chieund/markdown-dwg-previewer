@@ -15,9 +15,12 @@ export function exportBackground(view: ViewBox): ViewBox {
   return { x: view.x - view.w, y: view.y - view.h, w: view.w * 3, h: view.h * 3 };
 }
 
-export function toStandaloneSvg(svg: SVGSVGElement): string {
+export type PixelSize = { width: number; height: number };
+
+/** `size` fixes the output size for an SVG that is not laid out on screen. */
+export function toStandaloneSvg(svg: SVGSVGElement, size?: PixelSize): string {
   const clone = svg.cloneNode(true) as SVGSVGElement;
-  const { width, height } = pixelSize(svg);
+  const { width, height } = size ?? pixelSize(svg);
 
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
   clone.setAttribute('width', String(Math.round(width)));
@@ -39,9 +42,10 @@ export function toStandaloneSvg(svg: SVGSVGElement): string {
   return `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`;
 }
 
-export async function toPngBase64(svg: SVGSVGElement): Promise<string> {
-  const source = toStandaloneSvg(svg);
-  const { width, height } = scaleToLimit(pixelSize(svg), PNG_MAX_EDGE);
+/** With `size` the PNG has exactly those pixels; without it, the view's proportions at PNG_MAX_EDGE. */
+export async function toPngBase64(svg: SVGSVGElement, size?: PixelSize): Promise<string> {
+  const source = toStandaloneSvg(svg, size);
+  const { width, height } = size ?? scaleToLimit(pixelSize(svg), PNG_MAX_EDGE);
 
   const image = await loadImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}`);
 

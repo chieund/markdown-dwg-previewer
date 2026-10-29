@@ -32,3 +32,10 @@ out-test/**
 **/.gitignore
 **/tsconfig.json
 tsconfig.*.json
+
+# Spike and workflow scratch
+spike/**
+out-spike/**
+.superpowers/**
+out/**/*.dwg
+out/**/*.dxf

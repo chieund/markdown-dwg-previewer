@@ -53,7 +53,22 @@ const previewConfig = {
   sourcemap: true,
 };
 
+// AI agent evaluation harness (claude -p against the in-process MCP server).
+const aiEvalConfig = {
+  entryPoints: ['scripts/aiEval.ts'],
+  bundle: true,
+  outfile: 'out-test/aiEval.js',
+  platform: 'node',
+  format: 'cjs',
+  external: ['vscode', '@mlightcad/libredwg-web'],
+  sourcemap: true,
+};
+
 async function run() {
+  if (process.argv.includes('--ai-eval')) {
+    await esbuild.build(aiEvalConfig);
+    return;
+  }
   if (process.argv.includes('--corpus')) {
     await esbuild.build(corpusConfig);
     return;

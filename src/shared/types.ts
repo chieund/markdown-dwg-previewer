@@ -180,9 +180,25 @@ export interface LayerMeasure {
   hatchArea?: number;
 }
 
+/** One dimension drawn on a page, top-level or inside an INSERT. */
+export interface DimensionInfo {
+  /** The top-level object it belongs to: the INSERT, for a nested dimension. */
+  obj: number;
+  /** The text as drawn, same as ObjectInfo.text for a top-level dimension. */
+  text: string;
+  /** The dimension's own layer, which `obj` hides for a nested one. */
+  layer: string;
+  /** World position of the dimension text, else of its anchor point; left out when it has neither. */
+  position?: Point2D;
+  /** Group 42, when present; differs from `text` when the text is overridden. */
+  measurement?: number;
+}
+
 export interface ParsedDxf {
   pages: DxfPage[];
   objects: ObjectInfo[];
+  /** Every dimension drawn on a page, for reading sizes; left out when there are none. */
+  dimensions?: DimensionInfo[];
   skippedEntityTypes: string[];
   /** Problems worth telling the user about, e.g. a drawing cut short at the entity limit. */
   warnings?: string[];
@@ -230,3 +246,41 @@ export interface DrawingDiff {
   handleMatching: boolean;
   warnings?: string[];
 }
+
+/** Identifies one version of a drawing file: a changed mtime or size means a different drawing. */
+export interface DrawingKey {
+  path: string;
+  mtimeMs: number;
+  size: number;
+}
+
+/** What the AI asks the preview to show: highlight objects, switch page or layers, fit the view. */
+/**
+ * How long the preview holds an agent's show while it is still drawing a large drawing in batches,
+ * before refusing with "still drawing". The host waits this much longer for a show's answer.
+ */
+export const SHOW_DRAWN_WAIT_MS = 20_000;
+
+export interface ShowRequest {
+  objects?: number[];
+  page?: number;
+  layers?: { show?: string[]; hide?: string[]; only?: string[] };
+  fit?: boolean;
+}
+
+/** A picture of part of one page: a region, or the area around an object. */
+export interface SnapshotRequest {
+  page: number;
+  region?: Bounds;
+  around?: number;
+  margin?: number;
+}
+
+/** Host → webview: highlight, switch page or layers, zoom. `key` names the drawing version the ids refer to. */
+export type AgentShowMessage = { type: 'AGENT_SHOW'; requestId: string; key: DrawingKey } & ShowRequest;
+
+/** Host → webview: render part of a page as a PNG. The region is already resolved by the host. */
+export type AgentSnapshotMessage = { type: 'AGENT_SNAPSHOT'; requestId: string; key: DrawingKey } & SnapshotRequest;
+
+/** Webview → host: what became of an agent request; `png` is base64, snapshots only. */
+export type AgentResult = { type: 'AGENT_RESULT'; requestId: string; ok: boolean; message: string; png?: string };

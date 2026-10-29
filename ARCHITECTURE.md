@@ -286,6 +286,8 @@ markdown-dwg-previewer/
 │
 ├── src/
 │   ├── extension.ts             Entry point — registers the custom editor
+│   ├── previewSource.ts         file: → real-path store; other schemes → memory only
+│   ├── ai/                      AI drawing reader (see below)
 │   │
 │   ├── dwgEditorProvider.ts     Custom editor lifecycle
 │   │                            • Generates webview HTML (shell + theme-aware CSS)
@@ -340,6 +342,52 @@ markdown-dwg-previewer/
     ├── extension.js             Bundle for the extension host
     └── webview/main.js          Bundle for the webview
 ```
+
+---
+
+## AI drawing reader (`src/ai`)
+
+A local MCP server inside the extension lets AI agents (Claude Code, Copilot, others) read drawings.
+On by default (`dwgPreviewer.ai.enabled`); see the design spec in `docs/superpowers/specs/`.
+
+```
+src/ai/
+├── extensionHost.ts   Wiring (the only module that imports vscode): lazy start, settings,
+│                      token in SecretStorage, Connect / Disconnect, first-open prompt,
+│                      Clear Drawing Cache, Copilot MCP provider (VS Code ≥ 1.101)
+├── startup.ts         Pure decisions: start at startup only for users who connected or used AI
+│                      before; offer Connect only when Claude Code is installed
+├── server.ts          HTTP MCP server on 127.0.0.1:<port>/mcp (bearer token, no Origin), stateless.
+│                      Busy port → asks the occupant to prove the token (POST /mcp-identity,
+│                      HMAC-SHA256(token, nonce)): ours → standby, else "occupied"; retries either way
+├── tools.ts           The five tools: dwg_overview, dwg_find_text, dwg_dimensions (read the parsed
+│                      drawing), dwg_show, dwg_snapshot (drive the preview); failures are isError results
+├── drawingIndex.ts    Per-drawing object index (bounds, texts, dimensions) the tools search
+├── drawingStore.ts    Parsed drawings shared by preview and tools: LRU in memory, optional disk cache
+├── diskCache.ts       Gzipped parsed drawings in <globalStorage>/drawing-cache (AI side only)
+├── access.ts          Which files an agent may read: workspace folders of any window, open previews,
+│                      else a modal Allow prompt (60 s timeout → denied for that call)
+├── windows.ts         Registry of open windows' workspace folders (<globalStorage>/ai-windows)
+├── previewBridge.ts   Routes dwg_show / dwg_snapshot to the drawing's preview panel and back
+└── connect.ts         `claude mcp add|remove --scope user dwg-previewer`, CLI lookup (PATH, then the
+                       Claude Code extension's bundled binary)
+```
+
+Flow of a tool call:
+
+```
+agent ──HTTP──► server.ts ──► tools.ts ──► access.ts (real path allowed?)
+                                   │
+                                   ├──► drawingStore.get(real path) ──► memory / disk / worker parse
+                                   │
+                                   └──► previewBridge (show / snapshot)
+                                            │  AGENT_SHOW / AGENT_SNAPSHOT
+                                            ▼
+                                        webview (agent.ts plans, main.ts applies) ──► AGENT_RESULT
+```
+
+Only `file:` drawings take part: a preview of a `git:` revision or a virtual file is read through
+`vscode.workspace.fs` into a memory-only store and is never offered to an agent (`src/previewSource.ts`).
 
 ---
 
