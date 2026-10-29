@@ -1,7 +1,10 @@
 import { computeBounds } from '../shared/bounds';
+import { fold } from '../shared/fold';
 import type { Bounds, DxfEntity } from '../shared/types';
 import type { ParsedDxf } from '../shared/types';
 import type { StoredDrawing } from './drawingStore';
+
+export { fold };
 
 export interface Brief {
   id: number;
@@ -10,15 +13,6 @@ export interface Brief {
   block?: string;
   text?: string;
   distance?: number;
-}
-
-/** Case- and accent-insensitive form, so "coc" finds "cọc" and "dam" finds "Dầm". */
-export function fold(s: string): string {
-  return s
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[đĐ]/g, 'd')
-    .toLowerCase();
 }
 
 /** Insert into a short ascending list, dropping the worst past `max`; ties keep the earlier object. */
@@ -35,6 +29,10 @@ const round = (v: number) => Math.round(v * 1000) / 1000;
 export class DrawingIndex {
   private readonly boxes = new Map<number, Bounds>();
   private readonly main = new Map<number, Bounds | null>();
+  /** Same boxes as `boxes`, by object id, for the hot loop in `surroundings`. */
+  private readonly flat: (Bounds | undefined)[];
+  private readonly pageOf: Int32Array;
+  private readonly empty: Uint8Array;
 
   constructor(private readonly parsed: ParsedDxf) {
     const pieces = new Map<number, DxfEntity[]>();
@@ -49,6 +47,16 @@ export class DrawingIndex {
     for (const [obj, list] of pieces) {
       const b = computeBounds(list);
       if (b) this.boxes.set(obj, b);
+    }
+    const n = parsed.objects.length;
+    this.flat = new Array<Bounds | undefined>(n);
+    this.pageOf = new Int32Array(n);
+    this.empty = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const o = parsed.objects[i];
+      this.flat[i] = this.boxes.get(i);
+      this.pageOf[i] = o.page;
+      if (o.empty) this.empty[i] = 1;
     }
   }
 
@@ -92,21 +100,19 @@ export class DrawingIndex {
    * are listed apart as "inside", smallest first.
    */
   surroundings(id: number, count: number): { inside: Brief[]; nearby: Brief[] } {
-    const self = this.boxes.get(id);
-    const me = this.parsed.objects[id];
-    if (!self || !me) return { inside: [], nearby: [] };
+    const self = this.flat[id];
+    if (!self) return { inside: [], nearby: [] };
+    const page = this.pageOf[id];
     const cx = (self.minX + self.maxX) / 2;
     const cy = (self.minY + self.maxY) / 2;
     const selfSize = Math.max(self.maxX - self.minX, self.maxY - self.minY, 1e-9);
     // Bounded insertion: millions of objects must not allocate or sort per match
     const inside: { i: number; area: number }[] = [];
     const near: { i: number; dist: number }[] = [];
-    const objects = this.parsed.objects;
-    for (let i = 0; i < objects.length; i++) {
-      if (i === id) continue;
-      const other = objects[i];
-      if (other.page !== me.page || other.empty) continue;
-      const b = this.boxes.get(i);
+    const flat = this.flat;
+    for (let i = 0; i < flat.length; i++) {
+      if (i === id || this.empty[i] || this.pageOf[i] !== page) continue;
+      const b = flat[i];
       if (!b) continue;
       const w = b.maxX - b.minX;
       const h = b.maxY - b.minY;
@@ -116,7 +122,9 @@ export class DrawingIndex {
         continue;
       }
       if (count === 0) continue;
-      const dist = Math.hypot(Math.max(b.minX - cx, 0, cx - b.maxX), Math.max(b.minY - cy, 0, cy - b.maxY));
+      const dx = Math.max(b.minX - cx, 0, cx - b.maxX);
+      const dy = Math.max(b.minY - cy, 0, cy - b.maxY);
+      const dist = Math.sqrt(dx * dx + dy * dy);
       if (near.length < count || dist < near[near.length - 1].dist) insertSorted(near, { i, dist }, count, (x) => x.dist);
     }
     return {

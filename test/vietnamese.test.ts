@@ -42,14 +42,26 @@ test('text decoded as windows-1258 maps back to its bytes first', () => {
 });
 test('font files are recognised', () => {
   for (const f of ['.VnTime', 'VNTIME_1.TTF', 'vn-abc.shx', 'vnsimple.shx', 'Vnarial_0.ttf']) assert.equal(legacyFontOf(f), 'tcvn3');
-  for (const f of ['.VnArialH', 'VHTIME_0.TTF', 'VHARIAL.TTF']) assert.equal(legacyFontOf(f), 'tcvn3-caps');
+  for (const f of ['.VnArialH', 'VHTIME_0.TTF', 'VHARIAL.TTF', 'VnTimeH.TTF', 'VNArialH.TTF', 'VnArialH_0.TTF', 'vn-abch.shx']) assert.equal(legacyFontOf(f), 'tcvn3-caps');
   for (const f of ['Arial', 'TIMES.TTF', 'txt.shx', 'romans.shx', undefined]) assert.equal(legacyFontOf(f), null);
 });
 test('the encoding a file was read with follows its header', () => {
   const head = (...vars: string[]) => dxf('0', 'SECTION', '2', 'HEADER', ...vars, '0', 'ENDSEC');
-  assert.equal(legacyEncodingOf(head('9', '$ACADVER', '1', 'AC1021')), 'latin1');
+  assert.equal(legacyEncodingOf(head('9', '$ACADVER', '1', 'AC1021')), null);
   assert.equal(legacyEncodingOf(head('9', '$ACADVER', '1', 'AC1015', '9', '$DWGCODEPAGE', '3', 'ANSI_1258')), 'windows-1258');
   assert.equal(legacyEncodingOf(head('9', '$ACADVER', '1', 'AC1015')), 'windows-1252');
+});
+
+test('R2007+ text is Unicode, so a .Vn* style is not decoded as TCVN3 again', () => {
+  const src = dxf(
+    '0', 'SECTION', '2', 'HEADER', '9', '$ACADVER', '1', 'AC1021', '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'TABLES', '0', 'TABLE', '2', 'STYLE',
+    ...style('VN', '.VnTime'),
+    '0', 'ENDTAB', '0', 'ENDSEC',
+    ...entities(...text('A1', 'VN', 'cöa')),
+    '0', 'EOF'
+  );
+  assert.equal(parseDxf(src).objects[0].text, 'cöa');
 });
 
 test('only text drawn in a TCVN3 font is converted', () => {

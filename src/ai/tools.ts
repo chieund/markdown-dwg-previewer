@@ -1,5 +1,6 @@
 import * as path from 'path';
-import type { Bounds, DrawingKey, ShowRequest, SnapshotRequest } from '../shared/types';
+import { computeBounds } from '../shared/bounds';
+import type { Bounds, DrawingKey, ShowRequest, SnapshotRequest, TextEntity } from '../shared/types';
 import { fold, indexOf, type DrawingIndex } from './drawingIndex';
 import type { DrawingStore, StoredDrawing } from './drawingStore';
 
@@ -191,6 +192,30 @@ function describe(stored: StoredDrawing, index: DrawingIndex, id: number): Recor
   return out;
 }
 
+/**
+ * A TEXT/MTEXT drawn inside a block. `ObjectInfo` only describes the INSERT,
+ * so without this its label would be invisible to `dwg_find_text`; the id is
+ * the INSERT, which is also what `dwg_show` can highlight.
+ */
+function describeNestedText(stored: StoredDrawing, ownerId: number, page: number, entity: TextEntity): Record<string, unknown> {
+  const owner = stored.parsed.objects[ownerId];
+  const out: Record<string, unknown> = {
+    id: ownerId,
+    type: entity.type,
+    layer: entity.layer,
+    page: stored.parsed.pages[page]?.name,
+    text: entity.text,
+    inBlock: true,
+  };
+  if (owner.block) out.block = owner.block;
+  const b = computeBounds([entity]);
+  if (b) {
+    out.center = center(b);
+    out.size = { width: round(b.maxX - b.minX), height: round(b.maxY - b.minY) };
+  }
+  return out;
+}
+
 function overview(stored: StoredDrawing, file: string): ToolContent[] {
   const { parsed } = stored;
   const index = indexOf(stored);
@@ -247,6 +272,7 @@ function overview(stored: StoredDrawing, file: string): ToolContent[] {
         ...(units === UNITS_NOT_DECLARED
           ? { unitsNote: 'The drawing does not declare ($INSUNITS missing or 0). Do not assume a unit; infer only with stated reasoning.' }
           : {}),
+        ...(parsed.warnings?.length ? { warnings: parsed.warnings } : {}),
         ...(truncated ? { truncated: true } : {}),
         totalObjects: parsed.objects.reduce((n, o) => n + (o.empty ? 0 : 1), 0),
         totalLayers: layers.size,
@@ -280,6 +306,10 @@ function overview(stored: StoredDrawing, file: string): ToolContent[] {
   return [{ type: 'text', text: json }];
 }
 
+type TextHit =
+  | { kind: 'object'; id: number }
+  | { kind: 'nested'; owner: number; page: number; entity: TextEntity };
+
 function findText(stored: StoredDrawing, args: Args): ToolContent[] {
   const index = indexOf(stored);
   const page = pageIndex(stored, args.page);
@@ -288,28 +318,57 @@ function findText(stored: StoredDrawing, args: Args): ToolContent[] {
   const layer = str(args, 'layer');
   const limit = num(args, 'limit', 30, 200);
   const nearby = num(args, 'nearby', 5, 30);
-  const hits: number[] = [];
+  const hits: TextHit[] = [];
   let total = 0;
+  const want = (text: string, textPage: number, textLayer: string): boolean => {
+    if (page !== undefined && textPage !== page) return false;
+    if (layer && fold(textLayer) !== fold(layer)) return false;
+    return !q || fold(text).includes(q);
+  };
   stored.parsed.objects.forEach((o, i) => {
-    if (o.empty || (page !== undefined && o.page !== page)) return;
-    if (layer && fold(o.layer) !== fold(layer)) return;
+    if (o.empty) return;
     const haystack = [o.text ?? '', o.block ?? '', ...(o.attributes ?? []).map((a) => `${a.tag} ${a.value}`)].join(' ');
-    if (!haystack.trim()) return;
-    if (q && !fold(haystack).includes(q)) return;
+    if (!haystack.trim() || !want(haystack, o.page, o.layer)) return;
     total++;
-    if (hits.length < limit) hits.push(i);
+    if (hits.length < limit) hits.push({ kind: 'object', id: i });
+  });
+  // Text inside a block is drawn on the page but only the INSERT is an object.
+  // Scan those entities too, or a door/window label inside its block is lost.
+  stored.parsed.pages.forEach((p, pageIndex) => {
+    for (const entity of p.entities) {
+      if (entity.type !== 'TEXT' || !entity.text || entity.obj === undefined) continue;
+      const owner = stored.parsed.objects[entity.obj];
+      if (!owner || owner.type !== 'INSERT') continue;
+      if (!want(entity.text, pageIndex, entity.layer)) continue;
+      total++;
+      if (hits.length < limit) hits.push({ kind: 'nested', owner: entity.obj, page: pageIndex, entity });
+    }
   });
   // Surroundings are the costly part: stop computing once the output cap is reached
   const matches: Record<string, unknown>[] = [];
   let size = 0;
-  for (const i of hits) {
-    const m = { ...describe(stored, index, i), ...index.surroundings(i, nearby) };
+  for (const hit of hits) {
+    const m =
+      hit.kind === 'object'
+        ? { ...describe(stored, index, hit.id), ...index.surroundings(hit.id, nearby) }
+        : { ...describeNestedText(stored, hit.owner, hit.page, hit.entity), ...index.surroundings(hit.owner, nearby) };
     matches.push(m);
     size += JSON.stringify(m, null, 1).length;
     if (size > MAX_OUTPUT_CHARS) break;
   }
   const render = (kept: unknown[]) =>
-    JSON.stringify({ query: query ?? null, totalMatches: total, returned: kept.length, truncated: kept.length < total, matches: kept }, null, 1);
+    JSON.stringify(
+      {
+        query: query ?? null,
+        totalMatches: total,
+        returned: kept.length,
+        truncated: kept.length < total,
+        ...(stored.parsed.warnings?.length ? { warnings: stored.parsed.warnings } : {}),
+        matches: kept,
+      },
+      null,
+      1
+    );
   return [{ type: 'text', text: fitList(matches, render).json }];
 }
 
@@ -353,7 +412,15 @@ function dimensions(stored: StoredDrawing, args: Args): ToolContent[] {
   const valueCounts = Object.fromEntries([...counts].sort((a, b) => b[1] - a[1]).slice(0, 200));
   const render = (kept: unknown[]) =>
     JSON.stringify(
-      { total: rows.length, returned: kept.length, truncated: kept.length < rows.length, noText, valueCounts, dimensions: kept },
+      {
+        total: rows.length,
+        returned: kept.length,
+        truncated: kept.length < rows.length,
+        ...(parsed.warnings?.length ? { warnings: parsed.warnings } : {}),
+        noText,
+        valueCounts,
+        dimensions: kept,
+      },
       null,
       1
     );

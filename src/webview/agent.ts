@@ -1,3 +1,4 @@
+import { fold } from '../shared/fold';
 import type { Bounds, DrawingKey, ShowRequest, SnapshotRequest } from '../shared/types';
 import type { ViewBox } from './panZoom';
 
@@ -18,10 +19,15 @@ export function keyMatches(current: DrawingKey | undefined, asked: DrawingKey): 
 /** Layer names the request mentions that the page does not have, in request order. */
 export function unknownLayers(all: string[], req: ShowRequest['layers']): string[] {
   if (!req) return [];
-  const known = new Set(all);
+  const byFold = new Map(all.map((name) => [fold(name), name]));
   const unknown: string[] = [];
+  const seen = new Set<string>();
   for (const name of [...(req.only ?? []), ...(req.show ?? []), ...(req.hide ?? [])]) {
-    if (!known.has(name) && !unknown.includes(name)) unknown.push(name);
+    const key = fold(name);
+    if (!byFold.has(key) && !seen.has(key)) {
+      seen.add(key);
+      unknown.push(name);
+    }
   }
   return unknown;
 }
@@ -30,21 +36,29 @@ export function unknownLayers(all: string[], req: ShowRequest['layers']): string
  * The hidden-layer set after a request. `only` wins over `show` and `hide`;
  * unknown names are ignored (see `unknownLayers`), and an `only` naming no
  * known layer is ignored too, since it would blank the page. The input is not changed.
+ * Layer names are matched without regard to case or Vietnamese accents.
  */
 export function nextHiddenLayers(all: string[], hidden: Set<string>, req: ShowRequest['layers']): Set<string> {
   const next = new Set(hidden);
   if (!req) return next;
-  const known = new Set(all);
+  const byFold = new Map(all.map((name) => [fold(name), name]));
+  const canonical = (name: string): string | undefined => byFold.get(fold(name));
 
-  const only = (req.only ?? []).filter((name) => known.has(name));
+  const only = (req.only ?? []).map(canonical).filter((name): name is string => name !== undefined);
   if (only.length > 0) {
     const keep = new Set(only);
     return new Set(all.filter((name) => !keep.has(name)));
   }
   if (req.only?.length) return next;
 
-  for (const name of req.show ?? []) if (known.has(name)) next.delete(name);
-  for (const name of req.hide ?? []) if (known.has(name)) next.add(name);
+  for (const name of req.show ?? []) {
+    const actual = canonical(name);
+    if (actual) next.delete(actual);
+  }
+  for (const name of req.hide ?? []) {
+    const actual = canonical(name);
+    if (actual) next.add(actual);
+  }
   return next;
 }
 
@@ -148,6 +162,8 @@ export interface AgentScene {
   hidden: Set<string>;
   /** Page index of each object, by object id. */
   objectPages: ArrayLike<number>;
+  /** Layer of each object, by object id; used to make a highlight visible. */
+  objectLayers?: ArrayLike<string>;
 }
 
 export type Refusal = { ok: false; message: string };
@@ -228,6 +244,17 @@ export function planShow(state: AgentState, scene: AgentScene, key: DrawingKey, 
     } else {
       plan.highlight = onPage;
       notes.unshift(`Highlighted ${plural(onPage.length, 'object')} on ${pageName} and zoomed to them.`);
+      // A selected object on a hidden layer would be invisible, so show those layers.
+      const hidden = plan.hiddenLayers ? new Set(plan.hiddenLayers) : new Set(scene.hidden);
+      const shown: string[] = [];
+      for (const id of onPage) {
+        const layer = scene.objectLayers?.[id];
+        if (layer && hidden.delete(layer) && !shown.includes(layer)) shown.push(layer);
+      }
+      if (shown.length) {
+        plan.hiddenLayers = hidden;
+        notes.push(`Also showed ${plural(shown.length, 'layer')} (${shown.join(', ')}) so the highlighted objects are visible.`);
+      }
     }
   } else if (req.fit || req.page !== undefined) {
     plan.fit = true;

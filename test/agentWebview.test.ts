@@ -25,6 +25,13 @@ test('unknown names change nothing and are reported', () => {
   assert.deepEqual(unknownLayers(ALL, req), ['Nope', 'Ghost']);
 });
 
+test('layer names are matched without regard to case or accents', () => {
+  assert.deepEqual([...nextHiddenLayers(ALL, new Set(['Walls']), { show: ['WALLS'] })], []);
+  assert.deepEqual([...nextHiddenLayers(ALL, new Set(), { hide: ['piles'] })], ['Piles']);
+  assert.deepEqual([...nextHiddenLayers(ALL, new Set(), { only: ['PILES'] })].sort(), ['Doors', 'Text', 'Walls']);
+  assert.deepEqual(unknownLayers(['Tường'], { hide: ['TUONG'] }), []);
+});
+
 test('only with no known layer would blank the page, so it is ignored', () => {
   const next = nextHiddenLayers(ALL, new Set(['Text']), { only: ['Nope'] });
   assert.deepEqual([...next], ['Text']);
@@ -148,6 +155,18 @@ test('planShow reports unknown layers and yields the new hidden set', () => {
   const none = planShow(state, scene, KEY, { layers: { only: ['Ghost'] } });
   assert.ok(none.ok);
   assert.match(none.message, /left as they were/);
+});
+
+test('planShow shows a hidden layer so the highlighted object is visible', () => {
+  const withLayers = {
+    ...scene,
+    hidden: new Set(['Walls']),
+    objectLayers: ['Walls', 'Doors', 'Frame', 'Text'],
+  };
+  const plan = planShow(state, withLayers, KEY, { objects: [0] });
+  assert.ok(plan.ok);
+  assert.deepEqual([...(plan.hiddenLayers ?? [])], []);
+  assert.match(plan.message, /Also showed 1 layer \(Walls\)/);
 });
 
 test('planShow with only a page or fit asks for a fit', () => {

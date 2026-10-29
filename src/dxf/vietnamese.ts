@@ -32,9 +32,17 @@ export function legacyFontOf(fontFile: string | undefined): LegacyFont {
   const name = fontFile.trim().toLowerCase().split(/[\\/]/).pop() ?? '';
   // `.VnTime` is TCVN3; the trailing H marks the all-capitals variant (`.VnTimeH`).
   if (/^\.vn[a-z0-9 _-]*$/.test(name)) return name.endsWith('h') ? 'tcvn3-caps' : 'tcvn3';
-  if (/^vh[a-z]+_?\d?\.ttf$/.test(name)) return 'tcvn3-caps';
-  if (/^vn[a-z]+_?\d?\.ttf$/.test(name)) return 'tcvn3';
-  if (/^vn[a-z0-9_-]*\.shx$/.test(name)) return 'tcvn3';
+  if (/^vh[a-z0-9 _-]*\.ttf$/.test(name)) return 'tcvn3-caps';
+  const ttf = /^vn[a-z0-9 _-]*\.ttf$/.exec(name);
+  if (ttf) {
+    const base = ttf[0].slice(0, -4).replace(/_?\d+$/, '');
+    return base.endsWith('h') ? 'tcvn3-caps' : 'tcvn3';
+  }
+  const shx = /^vn[a-z0-9_-]*\.shx$/.exec(name);
+  if (shx) {
+    const base = shx[0].slice(0, -4);
+    return base.endsWith('h') ? 'tcvn3-caps' : 'tcvn3';
+  }
   return null;
 }
 

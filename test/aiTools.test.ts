@@ -98,6 +98,38 @@ test('find_text folds accents; lists what it is inside and what is nearby', asyn
   assert.ok(!m.nearby.some((b: { block?: string }) => b.block === 'FRAME'), 'containers are not nearby');
 });
 
+test('find_text finds labels drawn inside a block and points at the INSERT', async () => {
+  const src = dxf(
+    '0', 'SECTION', '2', 'BLOCKS',
+    '0', 'BLOCK', '2', 'DOOR', '70', '0', '10', '0', '20', '0', '30', '0',
+    '0', 'TEXT', '5', 'T1', '8', '0', '10', '0', '20', '0', '30', '0', '40', '1', '1', 'Cửa D1',
+    '0', 'ENDBLK',
+    '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'INSERT', '5', 'I1', '8', '0', '2', 'DOOR', '10', '5', '20', '5', '30', '0',
+    '0', 'TEXT', '5', 'T2', '8', '0', '10', '10', '20', '10', '30', '0', '40', '1', '1', 'Cửa D2',
+    '0', 'ENDSEC', '0', 'EOF'
+  );
+  const r = await json(hostFor(src), 'dwg_find_text', { query: 'Cửa' });
+  assert.equal(r.totalMatches, 2);
+  const nested = r.matches.find((m: { text?: string }) => m.text === 'Cửa D1');
+  assert.ok(nested, JSON.stringify(r.matches));
+  assert.equal(nested.id, 0);
+  assert.equal(nested.block, 'DOOR');
+  assert.equal(nested.inBlock, true);
+  assert.ok(nested.center);
+  assert.equal(r.matches.filter((m: { text?: string }) => m.text === 'Cửa D2').length, 1);
+});
+
+test('warnings from a cut-short drawing reach every reading tool', async () => {
+  const parsed = parseDxf(fixture());
+  parsed.warnings = ['Drawing cut short after 1000 entities'];
+  const host = hostFor(parsed);
+  assert.deepEqual((await json(host, 'dwg_overview')).warnings, parsed.warnings);
+  assert.deepEqual((await json(host, 'dwg_find_text', { query: 'cua' })).warnings, parsed.warnings);
+  assert.deepEqual((await json(host, 'dwg_dimensions')).warnings, parsed.warnings);
+});
+
 test('find_text respects limit and keeps an exact total', async () => {
   const r = await json(hostFor(fixture()), 'dwg_find_text', { query: 'l', limit: 1 });
   assert.equal(r.returned, 1);

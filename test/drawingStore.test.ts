@@ -54,6 +54,16 @@ test('persisted drawings load from disk in a new store without parsing', async (
   assert.deepEqual(got.parsed, fakeParsed('v1'));
 });
 
+test('the disk cache keeps drawing text private to the user', async (t) => {
+  if (process.platform === 'win32') return t.skip('POSIX permissions');
+  const dir = path.join(tmp(), 'drawing-cache');
+  const disk = new DiskCache(dir);
+  await disk.write({ path: '/a.dxf', mtimeMs: 1, size: 10 }, fakeParsed('private'));
+  assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
+  const [file] = fs.readdirSync(dir);
+  assert.equal(fs.statSync(path.join(dir, file)).mode & 0o777, 0o600);
+});
+
 test('the preview path never touches the disk', async () => {
   const dir = tmp();
   const { store } = setup({ disk: new DiskCache(dir) });

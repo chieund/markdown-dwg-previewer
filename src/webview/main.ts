@@ -1073,6 +1073,7 @@ function agentScene(): (AgentScene & { pageBounds: (Bounds | null)[] }) | null {
     layersOfPage: scene.pages.map((page) => page.layers.map((layer) => layer.name)),
     hidden: scene.hiddenLayers,
     objectPages: objects.map((obj) => obj.page),
+    objectLayers: objects.map((obj) => obj.layer),
     pageBounds: scene.pages.map((page) => page.bounds),
   };
 }

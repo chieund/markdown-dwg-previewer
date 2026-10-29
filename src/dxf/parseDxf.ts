@@ -135,8 +135,8 @@ interface ParseContext {
   textStyles: Record<string, string>;
   /** Text style name (upper case) → the font file it names, for telling TCVN3 text apart. */
   fontFiles: Record<string, string>;
-  /** The single-byte code page the file's text was read with; TCVN3 bytes are recovered through it. */
-  legacyEncoding: string;
+  /** The single-byte code page the file's text was read with; TCVN3 bytes are recovered through it. Null for Unicode (R2007+) files. */
+  legacyEncoding: string | null;
   /** Extrusion, text style and file position per entity handle. */
   extras: EntityExtras;
   /** Anonymous block name → the block it is a representation of. */
@@ -1871,7 +1871,7 @@ function textLegacyFont(raw: IEntity, context: Pick<ParseContext, 'extras' | 'te
 
 /** Text drawn in a TCVN3 font, read as the Vietnamese it stands for. */
 function readLegacy(text: string, font: LegacyFont, context: Pick<ParseContext, 'legacyEncoding'>): string {
-  return font ? decodeTcvn3(text, font === 'tcvn3-caps', context.legacyEncoding) : text;
+  return font && context.legacyEncoding ? decodeTcvn3(text, font === 'tcvn3-caps', context.legacyEncoding) : text;
 }
 
 /**
@@ -1902,7 +1902,7 @@ function toHexColor(truecolor: number): string {
  * - codes whose argument runs to a semicolon: `\f \H \C \S` …
  * - escapes standing for a character: `\P \N \~ \\ \{ \}` and `\U+XXXX`.
  */
-function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith = 'latin1'): string {
+function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith: string | null = 'latin1'): string {
   let out = '';
   // `\f` switches the font until the `{}` scope it sits in ends.
   let font = baseFont;
@@ -1918,7 +1918,7 @@ function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith = 'lat
       continue;
     }
     if (ch !== '\\' || i + 1 >= raw.length) {
-      out += font ? decodeTcvn3(ch, font === 'tcvn3-caps', decodedWith) : ch;
+      out += font && decodedWith ? decodeTcvn3(ch, font === 'tcvn3-caps', decodedWith) : ch;
       continue;
     }
 

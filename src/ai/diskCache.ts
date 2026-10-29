@@ -42,12 +42,16 @@ export class DiskCache {
   }
 
   async write(key: DrawingKey, parsed: ParsedDxf): Promise<void> {
-    await fs.mkdir(this.dir, { recursive: true });
+    // Parsed drawings contain drawing text and attributes: keep them private
+    // to the user, like the window registry and the token.
+    await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
+    // A cache folder made by an older version may still be group-readable.
+    await fs.chmod(this.dir, 0o700).catch(() => {});
     const file = this.fileFor(key);
     const tmp = `${file}.${process.pid}.${this.tmpCounter++}.tmp`;
     const data = await gzip(Buffer.from(JSON.stringify({ format: CACHE_FORMAT, key, parsed }), 'utf-8'));
     try {
-      await fs.writeFile(tmp, data);
+      await fs.writeFile(tmp, data, { mode: 0o600 });
       await fs.rename(tmp, file);
     } catch (err) {
       await fs.rm(tmp, { force: true });

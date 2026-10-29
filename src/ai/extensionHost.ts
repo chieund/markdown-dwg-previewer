@@ -2,13 +2,14 @@ import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { randomBytes, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { DiskCache, clearDrawingCache } from './diskCache';
 import { createAccessCheck } from './access';
 import { WindowRegistry } from './windows';
 import { startMcpServer, type RunningServer } from './server';
+import { getOrCreateToken } from './tokenStore';
 import {
   CLAUDE_EXTENSION_ID, MCP_DOCS_URL, SERVER_NAME, authorizationHeader, claudeAddCommandText, claudeRemoveArgs, connectClaude, disconnectClaude, findClaudeCli,
   isServerNotFound, lookupCommand, outsideDir,
@@ -22,16 +23,6 @@ const TOKEN_KEY = 'dwgPreviewer.ai.token';
 const PUBLISH_MS = 20_000;
 
 const realpath = promisify(fs.realpath.native);
-
-async function getOrCreateToken(secrets: vscode.SecretStorage): Promise<string> {
-  const existing = await secrets.get(TOKEN_KEY);
-  if (existing) return existing;
-  await secrets.store(TOKEN_KEY, randomBytes(32).toString('hex'));
-  // Another window may have stored its own at the same moment: use what ended up stored.
-  const stored = await secrets.get(TOKEN_KEY);
-  if (!stored) throw new Error('Could not store the AI access token');
-  return stored;
-}
 
 interface Running {
   port: number;
@@ -109,7 +100,7 @@ export function startAiFeature(
   }
 
   async function start(port: number): Promise<void> {
-    const token = await getOrCreateToken(context.secrets);
+    const token = await getOrCreateToken(context.secrets, storage.fsPath, TOKEN_KEY);
     const disk = new DiskCache(cacheDir());
     const registry = new WindowRegistry(windowsDir(), vscode.env.sessionId);
     const publish = () => registry.publish(ownFolders()).catch((e) => log(`Window registry publish failed: ${String(e)}`));
@@ -199,7 +190,7 @@ export function startAiFeature(
       return;
     }
     const port = cfg.get<number>('ai.port', 45131);
-    const token = await getOrCreateToken(context.secrets);
+    const token = await getOrCreateToken(context.secrets, storage.fsPath, TOKEN_KEY);
     if (running && running.port === port && running.token === token) return;
     await stop();
     if (disposed) return;
