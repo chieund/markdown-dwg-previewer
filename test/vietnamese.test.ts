@@ -77,6 +77,12 @@ test('text typed as Unicode keeps its letters even in a TCVN3 font', () => {
   assert.deepEqual(objects.map((o) => o.text), ['Ghi chú cửa sổ', 'Mặt bằng tầng 2']);
 });
 
+test('a windows-1258 file reads TCVN3 bytes that look like Vietnamese letters there', () => {
+  // 0xE3 is "ó" in TCVN3 and "ă" in windows-1258; 0xF5 is "ừ" and "ơ"
+  const asRead = new TextDecoder('windows-1258').decode(new Uint8Array([0x67, 0xe3, 0x63, 0x20, 0x74, 0xf5]));
+  assert.equal(decodeTcvn3(asRead, false, 'windows-1258'), 'góc từ');
+});
+
 test('only text drawn in a TCVN3 font is converted', () => {
   const objects = parseDxf(
     withStyles(...entities(...text('A1', 'VN', 'cöa'), ...text('A2', 'STD', 'cöa'), ...text('A3', 'STD', '30×30')))

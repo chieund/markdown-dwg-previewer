@@ -6,6 +6,7 @@
  * Everything is in drawing units and works on the drawn entities, so an
  * INSERT measures as the lines it expands to.
  */
+import { hatchArea, polygonArea } from '../dxf/measure';
 import type { DxfEntity, Point2D } from '../shared/types';
 
 export interface Segment {
@@ -116,9 +117,10 @@ function thin(segments: Segment[], max: number): Segment[] {
 export function gapBetween(from: Segment[], to: Segment[]): (Gap & { approximate?: true }) | undefined {
   if (from.length === 0 || to.length === 0) return undefined;
   const approximate = from.length * to.length > MAX_PAIRS;
+  // Thin the larger set first: ten segments against a million keeps all ten
   const side = Math.floor(Math.sqrt(MAX_PAIRS));
-  const a = approximate ? thin(from, side) : from;
-  const b = approximate ? thin(to, side) : to;
+  const a = thin(from, Math.max(side, Math.floor(MAX_PAIRS / Math.min(to.length, side))));
+  const b = thin(to, Math.max(1, Math.floor(MAX_PAIRS / a.length)));
   let best: Gap = { distance: Infinity, from: a[0].a, to: b[0].a };
   const consider = (p: Point2D, q: Point2D) => {
     const d = Math.hypot(p.x - q.x, p.y - q.y);
@@ -135,27 +137,6 @@ export function gapBetween(from: Segment[], to: Segment[]): (Gap & { approximate
     }
   }
   return approximate ? { ...best, approximate: true } : best;
-}
-
-/** Length of a path through the points, in order; `closed` adds the way back to the start. */
-export function pathLength(points: Point2D[], closed: boolean): number {
-  let total = 0;
-  for (let i = 1; i < points.length; i++) total += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
-  if (closed && points.length > 2) {
-    total += Math.hypot(points[0].x - points[points.length - 1].x, points[0].y - points[points.length - 1].y);
-  }
-  return total;
-}
-
-/** Area inside the outline through the points (shoelace), whichever way round they run. */
-export function polygonArea(points: Point2D[]): number {
-  let twice = 0;
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i];
-    const q = points[(i + 1) % points.length];
-    twice += p.x * q.y - q.x * p.y;
-  }
-  return Math.abs(twice) / 2;
 }
 
 /** Even-odd test: is the point inside the outline through `polygon`? */
@@ -212,9 +193,7 @@ export function enclosuresAt(entities: DxfEntity[], point: Point2D, max: number)
       let inside = false;
       for (const loop of e.loops) if (loop.length > 2 && pointInPolygon(point, loop)) inside = !inside;
       if (inside) {
-        const outer = e.loops.reduce((big, loop) => (polygonArea(loop) > polygonArea(big) ? loop : big), e.loops[0]);
-        const holes = e.loops.reduce((sum, loop) => sum + polygonArea(loop), 0) - polygonArea(outer);
-        found.push({ obj: e.obj, layer: e.layer, kind: 'hatch', area: Math.max(0, polygonArea(outer) - holes), ...extent(outer) });
+        found.push({ obj: e.obj, layer: e.layer, kind: 'hatch', area: hatchArea(e.loops), ...extent(e.loops.flat()) });
       }
     }
   }

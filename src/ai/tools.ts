@@ -2,7 +2,8 @@ import * as path from 'path';
 import { computeBounds } from '../shared/bounds';
 import { takeOff } from '../shared/takeoff';
 import type { Bounds, DrawingKey, DxfEntity, Point2D, ShowRequest, SnapshotRequest, TextEntity } from '../shared/types';
-import { enclosuresAt, gapBetween, pathLength, polygonArea, segmentsOf } from './measure';
+import { pathLength, polygonArea } from '../dxf/measure';
+import { enclosuresAt, gapBetween, segmentsOf } from './measure';
 import { fold, indexOf, type DrawingIndex } from './drawingIndex';
 import type { DrawingStore, StoredDrawing } from './drawingStore';
 
@@ -507,6 +508,8 @@ function regionArg(v: unknown): Bounds | undefined {
 /** Ids listed per block row; the count stays exact. */
 const IDS_PER_ROW = 50;
 const VALUES_PER_TAG = 30;
+const TAGS_PER_PAGE = 40;
+const VALUE_CHARS = 80;
 
 function quantities(stored: StoredDrawing, args: Args): ToolContent[] {
   const { parsed } = stored;
@@ -517,9 +520,16 @@ function quantities(stored: StoredDrawing, args: Args): ToolContent[] {
   const layer = str(args, 'layer');
   const layerQuery = layer ? fold(layer) : undefined;
   const region = regionArg(args.region);
+  // Folding is per distinct name: a drawing has millions of objects and a few hundred names
+  const verdicts = new Map<string, boolean>();
+  const once = (key: string, test: () => boolean): boolean => {
+    let v = verdicts.get(key);
+    if (v === undefined) verdicts.set(key, (v = test()));
+    return v;
+  };
   const include = (o: (typeof parsed.objects)[number], id: number): boolean => {
-    if (layerQuery !== undefined && fold(o.layer) !== layerQuery) return false;
-    if (blockQuery !== undefined && !(o.block && fold(o.block).includes(blockQuery))) return false;
+    if (layerQuery !== undefined && !once(`L${o.layer}`, () => fold(o.layer) === layerQuery)) return false;
+    if (blockQuery !== undefined && !(o.block && once(`B${o.block}`, () => fold(o.block!).includes(blockQuery)))) return false;
     if (region) {
       const b = index.bounds(id);
       if (!b) return false;
@@ -540,8 +550,10 @@ function quantities(stored: StoredDrawing, args: Args): ToolContent[] {
     if (onlyPage !== undefined && i !== onlyPage) return;
     const t = takeOff(parsed.objects, i, none, include);
     if (t.totals.count === 0 && onlyPage === undefined) return;
+    // Anonymous blocks (`*U12`) are the file's own bookkeeping names: after the named ones
+    const anonymous = (name: string) => (name.startsWith('*') ? 1 : 0);
     const blocks = t.blocks
-      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      .sort((a, b) => anonymous(a.name) - anonymous(b.name) || b.count - a.count || a.name.localeCompare(b.name))
       .map((row) => ({
         block: row.name,
         count: row.count,
@@ -569,15 +581,16 @@ function quantities(stored: StoredDrawing, args: Args): ToolContent[] {
         for (const id of row.objects) {
           for (const a of parsed.objects[id].attributes ?? []) {
             if (!a.value) continue;
+            const value = a.value.length > VALUE_CHARS ? `${a.value.slice(0, VALUE_CHARS)}…` : a.value;
             const values = tags.get(a.tag) ?? new Map<string, number>();
-            values.set(a.value, (values.get(a.value) ?? 0) + 1);
+            values.set(value, (values.get(value) ?? 0) + 1);
             tags.set(a.tag, values);
           }
         }
       }
       if (tags.size) {
         out.attributeValues = Object.fromEntries(
-          [...tags].map(([tag, values]) => [
+          [...tags].slice(0, TAGS_PER_PAGE).map(([tag, values]) => [
             tag,
             Object.fromEntries([...values].sort((a, b) => b[1] - a[1]).slice(0, VALUES_PER_TAG)),
           ])
@@ -594,7 +607,7 @@ function quantities(stored: StoredDrawing, args: Args): ToolContent[] {
   const render = (keep: number) => {
     let truncated = false;
     const cut = <T,>(list: T[]): T[] => {
-      const n = Math.max(0, Math.floor(list.length * keep));
+      const n = Math.max(0, Math.ceil(list.length * keep));
       if (n < list.length) truncated = true;
       return list.slice(0, n);
     };
@@ -651,7 +664,7 @@ function measure(stored: StoredDrawing, args: Args): ToolContent[] {
   const out: Record<string, unknown> = { ...unitsBlock(parsed.units) };
   let asked = false;
 
-  const ids = numberList(args.objects);
+  const ids = numberList(args.objects) && [...new Set(numberList(args.objects))];
   if (ids?.length) {
     asked = true;
     if (ids.length > MAX_MEASURED) throw new Error(`At most ${MAX_MEASURED} objects per call`);
@@ -686,7 +699,8 @@ function measure(stored: StoredDrawing, args: Args): ToolContent[] {
     const end = (v: unknown, what: string) => {
       if (typeof v === 'number') {
         const { page, entities } = entitiesOfObject(stored, v);
-        const b = index.bounds(v)!;
+        const b = index.bounds(v);
+        if (!b) throw new Error(`Object ${v} has no geometry`);
         return { page, segments: segmentsOf(entities), centre: { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }, label: { object: v } };
       }
       const p = pointArg(v, `distance.${what}`);

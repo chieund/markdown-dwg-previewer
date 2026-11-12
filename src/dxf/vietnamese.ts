@@ -70,18 +70,30 @@ function reverseTable(label: string): Map<string, number> {
  */
 const UNICODE_VIETNAMESE = /[\u0102\u0103\u0110\u0111\u0128\u0129\u0168\u0169\u01a0\u01a1\u01af\u01b0\u1ea0-\u1ef9\u0300\u0301\u0303\u0309\u0323]/;
 
-/** True when the text is already Unicode Vietnamese and must not be read as TCVN3. */
-export function isUnicodeVietnamese(text: string): boolean {
-  return UNICODE_VIETNAMESE.test(text);
+/**
+ * The label for a Unicode (R2007+) file. Its characters are the code points
+ * themselves, so a letter outside Latin-1 can only have been typed as Unicode.
+ * In a single-byte code page that does not hold: windows-1258 reads the TCVN3
+ * byte for "ó" as "ă".
+ */
+export const UNICODE_FILE = 'latin1';
+
+/**
+ * True when text of a Unicode file is already Unicode Vietnamese and must not
+ * be read as TCVN3. Unicode text with only Latin-1 letters ("Phòng") cannot be
+ * told from TCVN3 and is still decoded, which is also how the font draws it.
+ */
+export function isUnicodeVietnamese(text: string, decodedWith: string): boolean {
+  return decodedWith === UNICODE_FILE && UNICODE_VIETNAMESE.test(text);
 }
 
 /**
  * Reads text that was decoded as `decodedWith` back as TCVN3.
  * Characters that are not a TCVN3 letter (ASCII, U+FFFD, anything unmapped) stay as they are,
- * and text that is already Unicode Vietnamese is left alone.
+ * and text of a Unicode file that is already Unicode Vietnamese is left alone.
  */
 export function decodeTcvn3(text: string, caps: boolean, decodedWith: string): string {
-  if (isUnicodeVietnamese(text)) return text;
+  if (isUnicodeVietnamese(text, decodedWith)) return text;
   const bytes = reverseTable(decodedWith);
   let out = '';
   for (const ch of text) {

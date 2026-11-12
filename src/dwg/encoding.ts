@@ -9,6 +9,8 @@
  * never valid UTF-8 by accident.
  */
 
+import { UNICODE_FILE } from '../dxf/vietnamese';
+
 /** Enough to reach `$ACADVER` and `$DWGCODEPAGE`, which open the header. */
 export const HEADER_SNIFF_BYTES = 64 * 1024;
 
@@ -62,7 +64,7 @@ export function decodeDxfBuffer(buffer: Uint8Array): string {
  */
 export function legacyEncodingOf(dxfHead: string): string {
   const version = headerValue(dxfHead, '$ACADVER');
-  if (version && version >= 'AC1021') return 'latin1';
+  if (version && version >= 'AC1021') return UNICODE_FILE;
   const codepage = headerValue(dxfHead, '$DWGCODEPAGE')?.toUpperCase();
   return (codepage && CODE_PAGES[codepage]) || 'windows-1252';
 }

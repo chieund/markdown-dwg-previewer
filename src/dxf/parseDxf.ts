@@ -1904,8 +1904,9 @@ function toHexColor(truecolor: number): string {
  */
 function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith = 'latin1'): string {
   let out = '';
-  // Text typed as Unicode stays as it is, whatever font it names (see decodeTcvn3)
-  const legacy = !isUnicodeVietnamese(raw);
+  // Text typed as Unicode stays as it is, whatever font it names (see decodeTcvn3).
+  // Judged for the whole MTEXT: one that mixes Unicode and TCVN3 runs keeps its TCVN3 raw.
+  const legacy = !isUnicodeVietnamese(raw, decodedWith);
   // `\f` switches the font until the `{}` scope it sits in ends.
   let font = baseFont;
   const scopes: LegacyFont[] = [];

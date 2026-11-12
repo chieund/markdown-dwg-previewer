@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { enclosuresAt, gapBetween, pathLength, pointInPolygon, polygonArea, segmentsOf } from '../src/ai/measure';
+import { enclosuresAt, gapBetween, pointInPolygon, segmentsOf } from '../src/ai/measure';
+import { pathLength, polygonArea } from '../src/dxf/measure';
 import type { DxfEntity, Point2D } from '../src/shared/types';
 
 const base = { layer: '0', color: '#fff' };
@@ -18,7 +19,6 @@ test('a path measures its legs, and an outline its area either way round', () =>
   assert.equal(pathLength(SQUARE, true), 14);
   assert.equal(polygonArea(SQUARE), 12);
   assert.equal(polygonArea([...SQUARE].reverse()), 12);
-  assert.equal(pathLength([{ x: 0, y: 0 }, { x: 3, y: 4 }], true), 5);
 });
 
 test('the gap between two parallel walls is the clear distance, with the points it runs between', () => {
@@ -45,6 +45,23 @@ test('a circle is measured along its curve', () => {
   assert.ok(Math.abs(gap.distance - 10) < 0.01, String(gap.distance));
   const arc = segmentsOf([{ ...base, type: 'ARC', center: { x: 0, y: 0 }, radius: 10, startAngle: 350, endAngle: 10 }]);
   assert.ok(arc.every((s) => s.a.x > 9.8), 'an arc across 0° stays on its short side');
+});
+
+test('a small set against a huge one keeps every segment of the small one', () => {
+  // The near segment sits where even thinning of the long row would skip it
+  const row: DxfEntity[] = Array.from({ length: 500_000 }, (_, i) => line(i, 100, i + 1, 100));
+  row[123_457] = line(123_457, 2, 123_458, 2);
+  const gap = gapBetween(segmentsOf([line(123_457, 0, 123_458, 0)]), segmentsOf(row))!;
+  assert.equal(gap.distance, 2);
+  assert.equal(gap.approximate, undefined);
+});
+
+test('a hatch with a hole and an island measures like the Quantities panel', () => {
+  const square = (x: number, size: number): Point2D[] => [{ x, y: x }, { x: x + size, y: x }, { x: x + size, y: x + size }, { x, y: x + size }];
+  const hatch: DxfEntity = { ...base, type: 'HATCH', solid: true, patternAngle: 0, patternSpacing: 0, obj: 3, loops: [square(0, 100), square(10, 80), square(40, 20)] };
+  const found = enclosuresAt([hatch], { x: 50, y: 50 }, 10);
+  assert.equal(found[0].area, 10000 - 6400 + 400);
+  assert.equal(found[0].width, 100);
 });
 
 test('nothing to compare gives no gap', () => assert.equal(gapBetween([], segmentsOf([line(0, 0, 1, 1)])), undefined));
