@@ -4,9 +4,9 @@
     "sizeKB": 185,
     "ok": true,
     "format": "dwg",
-    "convertMs": 221,
+    "convertMs": 223,
     "dxfKB": 932,
-    "parseMs": 174,
+    "parseMs": 188,
     "pages": 2,
     "entities": 1786,
     "viewportEntities": 1695,
@@ -16,6 +16,8 @@
       "-0.2499 -0.7499 35.75 23.25"
     ],
     "anonymousInserts": 0,
+    "texts": 190,
+    "textHash": "9bb9d0474658fcf6",
     "skipped": [
       "MULTILEADER"
     ]
@@ -25,9 +27,9 @@
     "sizeKB": 145,
     "ok": true,
     "format": "dwg",
-    "convertMs": 53,
+    "convertMs": 47,
     "dxfKB": 690,
-    "parseMs": 31,
+    "parseMs": 29,
     "pages": 1,
     "entities": 76,
     "viewportEntities": 0,
@@ -36,6 +38,8 @@
       "0 0 775.1 812.5"
     ],
     "anonymousInserts": 0,
+    "texts": 28,
+    "textHash": "5b2a40183930574c",
     "skipped": []
   },
   {
@@ -43,9 +47,9 @@
     "sizeKB": 222,
     "ok": true,
     "format": "dwg",
-    "convertMs": 107,
+    "convertMs": 83,
     "dxfKB": 1479,
-    "parseMs": 125,
+    "parseMs": 134,
     "pages": 2,
     "entities": 1232,
     "viewportEntities": 1082,
@@ -55,6 +59,8 @@
       "0 -4.164e-15 35.8 23"
     ],
     "anonymousInserts": 0,
+    "texts": 634,
+    "textHash": "accbb93146cf202f",
     "skipped": [
       "ACAD_TABLE"
     ]
@@ -66,7 +72,7 @@
     "format": "dwg",
     "convertMs": 87,
     "dxfKB": 1713,
-    "parseMs": 129,
+    "parseMs": 121,
     "pages": 2,
     "entities": 1523,
     "viewportEntities": 1376,
@@ -76,6 +82,8 @@
       "0 -4.164e-15 1148 552"
     ],
     "anonymousInserts": 0,
+    "texts": 618,
+    "textHash": "65a8dd7cb9210c40",
     "skipped": [
       "ACAD_TABLE"
     ]
@@ -85,9 +93,9 @@
     "sizeKB": 166,
     "ok": true,
     "format": "dwg",
-    "convertMs": 36,
+    "convertMs": 38,
     "dxfKB": 729,
-    "parseMs": 22,
+    "parseMs": 28,
     "pages": 1,
     "entities": 33,
     "viewportEntities": 0,
@@ -96,6 +104,8 @@
       "0 -3.71 592.5 651.9"
     ],
     "anonymousInserts": 0,
+    "texts": 26,
+    "textHash": "39c0d6495155c7f6",
     "skipped": []
   },
   {
@@ -103,9 +113,9 @@
     "sizeKB": 1745,
     "ok": true,
     "format": "dwg",
-    "convertMs": 467,
+    "convertMs": 465,
     "dxfKB": 9179,
-    "parseMs": 1853,
+    "parseMs": 1676,
     "pages": 3,
     "entities": 36431,
     "viewportEntities": 33952,
@@ -116,6 +126,8 @@
       "0.06151 0.1597 9.365 7.771"
     ],
     "anonymousInserts": 0,
+    "texts": 120,
+    "textHash": "ae22793b1bc71521",
     "skipped": []
   },
   {
@@ -123,9 +135,9 @@
     "sizeKB": 57,
     "ok": true,
     "format": "dwg",
-    "convertMs": 14,
+    "convertMs": 10,
     "dxfKB": 179,
-    "parseMs": 8,
+    "parseMs": 6,
     "pages": 1,
     "entities": 95,
     "viewportEntities": 0,
@@ -134,6 +146,8 @@
       "0 0 8 10.5"
     ],
     "anonymousInserts": 0,
+    "texts": 118,
+    "textHash": "edc44dcd371e942d",
     "skipped": []
   },
   {
@@ -141,7 +155,7 @@
     "sizeKB": 139,
     "ok": true,
     "format": "dwg",
-    "convertMs": 36,
+    "convertMs": 33,
     "dxfKB": 618,
     "parseMs": 14,
     "pages": 1,
@@ -152,6 +166,8 @@
       "0 0 93.11 67.57"
     ],
     "anonymousInserts": 0,
+    "texts": 34,
+    "textHash": "8442836b33876817",
     "skipped": []
   },
   {
@@ -159,7 +175,7 @@
     "sizeKB": 84,
     "ok": true,
     "format": "dwg",
-    "convertMs": 29,
+    "convertMs": 26,
     "dxfKB": 498,
     "parseMs": 25,
     "pages": 7,
@@ -176,6 +192,8 @@
       "3.417 6.644 7.017 7.144"
     ],
     "anonymousInserts": 0,
+    "texts": 128,
+    "textHash": "229cc0456129cd0a",
     "skipped": []
   },
   {
@@ -183,9 +201,9 @@
     "sizeKB": 428,
     "ok": true,
     "format": "dwg",
-    "convertMs": 138,
+    "convertMs": 128,
     "dxfKB": 2785,
-    "parseMs": 196,
+    "parseMs": 162,
     "pages": 1,
     "entities": 5199,
     "viewportEntities": 0,
@@ -194,6 +212,8 @@
       "1.716 1.067 12.77 13.13"
     ],
     "anonymousInserts": 0,
+    "texts": 647,
+    "textHash": "373ea00a54f8f07a",
     "skipped": [
       "OLE2FRAME"
     ]
@@ -203,9 +223,9 @@
     "sizeKB": 124,
     "ok": true,
     "format": "dwg",
-    "convertMs": 30,
+    "convertMs": 28,
     "dxfKB": 529,
-    "parseMs": 29,
+    "parseMs": 21,
     "pages": 1,
     "entities": 29,
     "viewportEntities": 0,
@@ -214,6 +234,8 @@
       "0 0 36 24"
     ],
     "anonymousInserts": 0,
+    "texts": 10,
+    "textHash": "0258af59b3bc42fe",
     "skipped": []
   },
   {
@@ -221,9 +243,9 @@
     "sizeKB": 125,
     "ok": true,
     "format": "dwg",
-    "convertMs": 28,
+    "convertMs": 27,
     "dxfKB": 540,
-    "parseMs": 17,
+    "parseMs": 16,
     "pages": 1,
     "entities": 29,
     "viewportEntities": 0,
@@ -232,6 +254,8 @@
       "0 0 841 594"
     ],
     "anonymousInserts": 0,
+    "texts": 10,
+    "textHash": "0258af59b3bc42fe",
     "skipped": []
   },
   {
@@ -239,7 +263,7 @@
     "sizeKB": 69,
     "ok": true,
     "format": "dwg",
-    "convertMs": 13,
+    "convertMs": 12,
     "dxfKB": 233,
     "parseMs": 6,
     "pages": 1,
@@ -250,6 +274,8 @@
       "0.5 -2.534 31.12 27.77"
     ],
     "anonymousInserts": 0,
+    "texts": 24,
+    "textHash": "c318b99b30609ab6",
     "skipped": []
   },
   {
@@ -257,9 +283,9 @@
     "sizeKB": 716,
     "ok": true,
     "format": "dwg",
-    "convertMs": 126,
+    "convertMs": 127,
     "dxfKB": 1973,
-    "parseMs": 26,
+    "parseMs": 21,
     "pages": 1,
     "entities": 0,
     "viewportEntities": 0,
@@ -268,6 +294,8 @@
       "empty"
     ],
     "anonymousInserts": 0,
+    "texts": 0,
+    "textHash": "e3b0c44298fc1c14",
     "skipped": [
       "3DSOLID",
       "PLANESURFACE"
@@ -278,9 +306,9 @@
     "sizeKB": 1383,
     "ok": true,
     "format": "dwg",
-    "convertMs": 293,
+    "convertMs": 277,
     "dxfKB": 3660,
-    "parseMs": 192,
+    "parseMs": 83,
     "pages": 1,
     "entities": 6,
     "viewportEntities": 0,
@@ -289,6 +317,8 @@
       "-9.003e-13 3676 477.5 3940"
     ],
     "anonymousInserts": 0,
+    "texts": 0,
+    "textHash": "e3b0c44298fc1c14",
     "skipped": [
       "3DSOLID",
       "LIGHT"
@@ -299,9 +329,9 @@
     "sizeKB": 951,
     "ok": true,
     "format": "dwg",
-    "convertMs": 183,
+    "convertMs": 187,
     "dxfKB": 2544,
-    "parseMs": 48,
+    "parseMs": 39,
     "pages": 1,
     "entities": 8,
     "viewportEntities": 0,
@@ -310,6 +340,8 @@
       "-34.32 -125.1 337.7 94.06"
     ],
     "anonymousInserts": 0,
+    "texts": 0,
+    "textHash": "e3b0c44298fc1c14",
     "skipped": [
       "3DSOLID",
       "LIGHT",
@@ -321,9 +353,9 @@
     "sizeKB": 540,
     "ok": true,
     "format": "dwg",
-    "convertMs": 135,
+    "convertMs": 109,
     "dxfKB": 1682,
-    "parseMs": 48,
+    "parseMs": 29,
     "pages": 1,
     "entities": 0,
     "viewportEntities": 0,
@@ -332,6 +364,8 @@
       "empty"
     ],
     "anonymousInserts": 0,
+    "texts": 0,
+    "textHash": "e3b0c44298fc1c14",
     "skipped": [
       "3DSOLID"
     ]
@@ -341,9 +375,9 @@
     "sizeKB": 4038,
     "ok": true,
     "format": "dxf-text",
-    "convertMs": 12,
+    "convertMs": 10,
     "dxfKB": 4038,
-    "parseMs": 687,
+    "parseMs": 459,
     "pages": 3,
     "entities": 10489,
     "viewportEntities": 8277,
@@ -354,6 +388,8 @@
       "0 7.3e-15 35.6 22.66"
     ],
     "anonymousInserts": 0,
+    "texts": 2840,
+    "textHash": "8f0005764ff6a59e",
     "skipped": [
       "LEADER"
     ]
@@ -363,9 +399,9 @@
     "sizeKB": 68,
     "ok": true,
     "format": "dwg",
-    "convertMs": 80,
+    "convertMs": 12,
     "dxfKB": 215,
-    "parseMs": 48,
+    "parseMs": 15,
     "pages": 1,
     "entities": 300,
     "viewportEntities": 0,
@@ -374,6 +410,8 @@
       "0.5 0.25 21.5 16.75"
     ],
     "anonymousInserts": 0,
+    "texts": 80,
+    "textHash": "82232385e52e57c5",
     "skipped": []
   },
   {
@@ -381,9 +419,9 @@
     "sizeKB": 2861,
     "ok": true,
     "format": "dwg",
-    "convertMs": 643,
+    "convertMs": 492,
     "dxfKB": 9716,
-    "parseMs": 106848,
+    "parseMs": 1661,
     "pages": 1,
     "entities": 42118,
     "viewportEntities": 0,
@@ -392,6 +430,8 @@
       "-3424 -2737 93480 52380"
     ],
     "anonymousInserts": 0,
+    "texts": 673,
+    "textHash": "456789ff1e8ee8fb",
     "skipped": [
       "3DSOLID",
       "WIPEOUT"
@@ -402,9 +442,9 @@
     "sizeKB": 1731,
     "ok": true,
     "format": "dwg",
-    "convertMs": 5256,
+    "convertMs": 870,
     "dxfKB": 14269,
-    "parseMs": 57667,
+    "parseMs": 2678,
     "pages": 1,
     "entities": 244682,
     "viewportEntities": 0,
@@ -413,6 +453,8 @@
       "0 0 235300 139700"
     ],
     "anonymousInserts": 0,
+    "texts": 6870,
+    "textHash": "8b520c103d8ddfbb",
     "skipped": []
   },
   {
@@ -420,9 +462,9 @@
     "sizeKB": 488,
     "ok": true,
     "format": "dxf-text",
-    "convertMs": 418,
+    "convertMs": 0,
     "dxfKB": 488,
-    "parseMs": 5326,
+    "parseMs": 44,
     "pages": 1,
     "entities": 155,
     "viewportEntities": 0,
@@ -431,6 +473,8 @@
       "-191700 -227300 274500 216600"
     ],
     "anonymousInserts": 0,
+    "texts": 64,
+    "textHash": "64ccc6aab74c2c9a",
     "skipped": []
   },
   {
@@ -438,9 +482,9 @@
     "sizeKB": 1444,
     "ok": true,
     "format": "dxf-text",
-    "convertMs": 311,
+    "convertMs": 1,
     "dxfKB": 1444,
-    "parseMs": 1799,
+    "parseMs": 115,
     "pages": 1,
     "entities": 693,
     "viewportEntities": 0,
@@ -449,6 +493,8 @@
       "34.82 43.88 303.4 239.9"
     ],
     "anonymousInserts": 0,
+    "texts": 0,
+    "textHash": "e3b0c44298fc1c14",
     "skipped": []
   }
 ]

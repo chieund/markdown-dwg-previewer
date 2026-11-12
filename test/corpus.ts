@@ -19,6 +19,7 @@
  * like out/extension.js at runtime — so the converter finds the WASM along the
  * same path it uses in the packaged extension.
  */
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { convertDwgToDxf, setConverterLogger } from '../src/dwg/converter';
@@ -53,6 +54,15 @@ interface FileResult {
    */
   anonymousInserts?: number;
   blocks?: number;
+  /** How many texts the drawing has: object texts, attribute values, dimension texts, drawn texts. */
+  texts?: number;
+  /**
+   * Fingerprint of every text as read. Counts and extents stay the same when
+   * text is decoded wrongly — 1.3.1 stopped reading TCVN3 Vietnamese in every
+   * DWG with the whole corpus matching. A hash, so a private drawing's words
+   * never reach the baseline.
+   */
+  textHash?: string;
   skipped?: string[];
 }
 
@@ -111,6 +121,17 @@ async function runFile(filePath: string, logLines: string[]): Promise<FileResult
     result.layers = new Set(parsed.pages.flatMap((p) => p.layers.map((l) => l.name))).size;
     result.extents = parsed.pages.map((page) => extentsOf(page.bounds));
     result.anonymousInserts = parsed.objects.filter((o) => o.type === 'INSERT' && o.block?.startsWith('*')).length;
+    const texts: string[] = [];
+    for (const o of parsed.objects) {
+      if (o.text) texts.push(o.text);
+      for (const a of o.attributes ?? []) texts.push(`${a.tag}=${a.value}`);
+    }
+    for (const d of parsed.dimensions ?? []) texts.push(d.text);
+    for (const page of parsed.pages) {
+      for (const e of page.entities) if (e.type === 'TEXT' && e.text) texts.push(e.text);
+    }
+    result.texts = texts.length;
+    result.textHash = createHash('sha256').update(texts.join('\n')).digest('hex').slice(0, 16);
     result.skipped = parsed.skippedEntityTypes.slice().sort();
     result.ok = true;
   } catch (err) {
@@ -206,6 +227,12 @@ function compareWithBaseline(results: FileResult[], baselinePath: string): numbe
         .map((extent, i) => (extent !== was.extents![i] ? `page ${i + 1}: ${was.extents![i] ?? 'none'} → ${extent}` : null))
         .filter(Boolean);
       regressions.push(`${now.file}: drawing extents moved (${pages.join('; ') || 'page count changed'}) — check it on screen, then --save`);
+    }
+    // Recorded since 2026-11-12; older baselines have no text fingerprint to compare.
+    if (was.ok && now.ok && was.textHash && was.textHash !== now.textHash) {
+      regressions.push(
+        `${now.file}: text content changed (${was.texts} → ${now.texts} texts) — read some labels on screen, then --save`
+      );
     }
   }
 
