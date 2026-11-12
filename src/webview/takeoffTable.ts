@@ -7,7 +7,7 @@
  * handing the numbers over.
  */
 import { Unit, convertArea, convertLength, exportNumber, formatCount, formatNumber } from './units';
-import type { Takeoff } from './takeoff';
+import type { Takeoff } from '../shared/takeoff';
 
 export type TakeoffTab = 'blocks' | 'layers';
 

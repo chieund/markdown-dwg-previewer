@@ -76,6 +76,8 @@ The extension runs a local [Model Context Protocol](https://modelcontextprotocol
 | `dwg_overview` | Sheets, units, layers, block counts — the place to start |
 | `dwg_find_text` | Text and attributes, accent-insensitive, with what they sit inside or near |
 | `dwg_dimensions` | Dimension values together with the text written on them |
+| `dwg_quantities` | How many of each block, and length and area per layer — exact counts, not a guess |
+| `dwg_measure` | Distances, sizes and areas measured from the geometry where no dimension is drawn |
 | `dwg_show` | Highlights and zooms to objects in your preview, so you see what it means |
 | `dwg_snapshot` | A picture of the view or a region |
 

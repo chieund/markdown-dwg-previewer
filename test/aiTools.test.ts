@@ -220,7 +220,7 @@ test('show and snapshot reach the preview with the checked path', async () => {
 });
 
 test('unknown tools and a missing path are errors; every tool is defined', async () => {
-  assert.equal(TOOL_DEFINITIONS.length, 5);
+  assert.equal(TOOL_DEFINITIONS.length, 7);
   assert.ok(((await callTool(hostFor(fixture()), 'nope', {}))[0] as { text: string }).text.startsWith('Error:'));
   assert.ok(((await callTool(hostFor(fixture()), 'dwg_overview', {}))[0] as { text: string }).text.startsWith('Error:'));
 });
@@ -304,4 +304,136 @@ test('245,000 objects: a 30-match find_text stays fast', async () => {
   const ms = Date.now() - t0;
   assert.equal(r.totalMatches, 31);
   assert.ok(ms < 2000, `took ${ms} ms`);
+});
+
+/** A plan: two rooms as closed polylines, three doors (two types) as blocks, a wall as a line. */
+function plan(): string {
+  const door = (x: number, y: number, type: string, layer = 'DOORS') => [
+    '0', 'INSERT', '8', layer, '2', 'Cửa đi', '66', '1', '10', String(x), '20', String(y), '30', '0',
+    '0', 'ATTRIB', '8', layer, '10', String(x), '20', String(y), '30', '0', '40', '10', '1', type, '2', 'TYPE',
+    '0', 'SEQEND',
+  ];
+  const room = (x: number, y: number, w: number, h: number) => [
+    '0', 'LWPOLYLINE', '8', 'ROOMS', '90', '4', '70', '1',
+    '10', String(x), '20', String(y), '10', String(x + w), '20', String(y), '10', String(x + w), '20', String(y + h), '10', String(x), '20', String(y + h),
+  ];
+  return dxf(
+    '0', 'SECTION', '2', 'HEADER', '9', '$INSUNITS', '70', '4', '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'BLOCKS',
+    '0', 'BLOCK', '2', 'Cửa đi', '70', '2', '10', '0', '20', '0', '30', '0',
+    '0', 'LINE', '8', '0', '10', '0', '20', '0', '30', '0', '11', '900', '21', '0', '31', '0',
+    '0', 'ATTDEF', '8', '0', '10', '0', '20', '0', '30', '0', '40', '10', '1', '', '3', 'Type', '2', 'TYPE',
+    '0', 'ENDBLK',
+    '0', 'BLOCK', '2', 'COLUMN', '70', '0', '10', '0', '20', '0', '30', '0',
+    '0', 'LINE', '8', '0', '10', '0', '20', '0', '30', '0', '11', '300', '21', '0', '31', '0',
+    '0', 'ENDBLK',
+    '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'ENTITIES',
+    ...room(0, 0, 4000, 3000),
+    ...room(6000, 0, 2000, 3000),
+    ...door(1000, 0, 'D1'),
+    ...door(7000, 0, 'D1'),
+    ...door(7000, 3000, 'D2'),
+    '0', 'INSERT', '8', 'COLS', '2', 'COLUMN', '10', '20000', '20', '0', '30', '0',
+    '0', 'LINE', '8', 'WALLS', '10', '0', '20', '5000', '30', '0', '11', '8000', '21', '5000', '31', '0',
+    '0', 'ENDSEC', '0', 'EOF'
+  );
+}
+
+test('quantities count each block and total each layer', async () => {
+  const q = await json(hostFor(plan()), 'dwg_quantities');
+  assert.equal(q.units, 'millimetre');
+  assert.equal(q.pages.length, 1);
+  const page = q.pages[0];
+  assert.deepEqual(page.blocks.map((b: { block: string; count: number }) => [b.block, b.count]), [['Cửa đi', 3], ['COLUMN', 1]]);
+  assert.equal(page.blocks[0].ids.length, 3);
+  const layer = (name: string) => page.layers.find((l: { layer: string }) => l.layer === name);
+  assert.equal(layer('WALLS').length, 8000);
+  assert.equal(layer('ROOMS').objects, 2);
+  assert.equal(layer('ROOMS').area, 4000 * 3000 + 2000 * 3000);
+  assert.equal(page.totals.objects, 7);
+});
+
+test('quantities narrow to a block name without accents and break it down by attribute', async () => {
+  const q = await json(hostFor(plan()), 'dwg_quantities', { block: 'cua' });
+  const page = q.pages[0];
+  assert.deepEqual(page.blocks.map((b: { count: number }) => b.count), [3]);
+  assert.deepEqual(page.attributeValues, { TYPE: { D1: 2, D2: 1 } });
+  assert.equal(page.layers, undefined);
+  assert.deepEqual(q.filter, { block: 'cua' });
+  assert.equal((await json(hostFor(plan()), 'dwg_quantities', { block: 'window' })).pages.length, 0);
+});
+
+test('quantities narrow to a layer and to a region', async () => {
+  const host = hostFor(plan());
+  const rooms = (await json(host, 'dwg_quantities', { layer: 'rooms' })).pages[0];
+  assert.equal(rooms.totals.objects, 2);
+  assert.equal(rooms.blocks.length, 0);
+  // The right-hand room and its two doors
+  const right = (await json(host, 'dwg_quantities', { region: { minX: 5500, minY: -500, maxX: 9000, maxY: 3500 } })).pages[0];
+  assert.deepEqual(right.blocks.map((b: { block: string; count: number }) => [b.block, b.count]), [['Cửa đi', 2]]);
+  assert.equal(right.layers.find((l: { layer: string }) => l.layer === 'ROOMS').area, 2000 * 3000);
+  const bad = await callTool(host, 'dwg_quantities', { path: '/d.dxf', region: { minX: 0 } });
+  assert.match((bad[0] as { text: string }).text, /^Error: region needs/);
+});
+
+test('quantities that would not fit are cut and say so, with exact totals', async () => {
+  const body: string[] = [];
+  for (let i = 0; i < 6000; i++) body.push('0', 'LINE', '8', `LAYER-${i}-${'x'.repeat(20)}`, '10', '0', '20', String(i), '30', '0', '11', '10', '21', String(i), '31', '0');
+  const q = await json(hostFor(dxf('0', 'SECTION', '2', 'ENTITIES', ...body, '0', 'ENDSEC', '0', 'EOF')), 'dwg_quantities');
+  assert.equal(q.truncated, true);
+  assert.equal(q.pages[0].totals.objects, 6000);
+  assert.equal(q.pages[0].totals.length, 60000);
+  assert.ok(q.pages[0].layers.length < 6000);
+});
+
+test('measure gives each object its size, and the total', async () => {
+  const host = hostFor(plan());
+  const m = await json(host, 'dwg_measure', { objects: [0, 1] });
+  assert.deepEqual(
+    m.objects.map((o: { area: number; width: number; height: number }) => [o.area, o.width, o.height]),
+    [[12_000_000, 4000, 3000], [6_000_000, 2000, 3000]]
+  );
+  assert.equal(m.totals.area, 18_000_000);
+  assert.equal(m.units, 'millimetre');
+  assert.match(((await callTool(host, 'dwg_measure', { path: '/d.dxf', objects: [9999] }))[0] as { text: string }).text, /^Error: No object 9999/);
+});
+
+test('measure finds the clear gap between two rooms and between a point and a wall', async () => {
+  const host = hostFor(plan());
+  const d = (await json(host, 'dwg_measure', { distance: { from: 0, to: 1 } })).distance;
+  assert.equal(d.gap, 2000);
+  assert.equal(d.dx, 2000);
+  assert.equal(d.dy, 0);
+  assert.equal(d.centerToCenter, 5000);
+  const wall = 6;
+  const p = (await json(host, 'dwg_measure', { distance: { from: { x: 100, y: 3000 }, to: wall } })).distance;
+  assert.equal(p.gap, 2000);
+  assert.deepEqual(p.from, { point: { x: 100, y: 3000 } });
+  assert.deepEqual(p.to, { object: wall });
+});
+
+test('measure traces an outline given by points', async () => {
+  const m = await json(hostFor(plan()), 'dwg_measure', { points: [{ x: 0, y: 0 }, { x: 4000, y: 0 }, { x: 4000, y: 3000 }, { x: 0, y: 3000 }] });
+  assert.deepEqual(m.path, { points: 4, length: 11000, closedLength: 14000, area: 12_000_000 });
+  const two = await json(hostFor(plan()), 'dwg_measure', { points: [{ x: 0, y: 0 }, { x: 3, y: 4 }] });
+  assert.deepEqual(two.path, { points: 2, length: 5 });
+});
+
+test('measure names the closed shape around a point, or says there is none', async () => {
+  const host = hostFor(plan());
+  const inRoom = await json(host, 'dwg_measure', { at: { x: 7000, y: 1500 } });
+  assert.deepEqual(inRoom.enclosing.map((e: { id: number; area: number; layer: string }) => [e.id, e.area, e.layer]), [[1, 6_000_000, 'ROOMS']]);
+  const outside = await json(host, 'dwg_measure', { at: { x: 5000, y: 1500 } });
+  assert.deepEqual(outside.enclosing, []);
+  assert.match(outside.enclosingNote, /separate lines/);
+});
+
+test('measure refuses an empty request and bad points', async () => {
+  const host = hostFor(plan());
+  const err = async (args: Record<string, unknown>) => ((await callTool(host, 'dwg_measure', { path: '/d.dxf', ...args }))[0] as { text: string }).text;
+  assert.match(await err({}), /^Error: Give at least one of/);
+  assert.match(await err({ points: [{ x: 0, y: 0 }] }), /^Error: points needs at least two/);
+  assert.match(await err({ at: { x: 'a', y: 0 } }), /^Error: at needs numeric/);
+  assert.match(await err({ distance: { from: 0, to: { x: 1 } } }), /^Error: distance\.to needs numeric/);
 });

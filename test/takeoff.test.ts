@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { measureSelection, takeOff } from '../src/webview/takeoff';
+import { measureSelection, takeOff } from '../src/shared/takeoff';
 import { DECLARABLE_UNITS, DRAWING_UNITS, NO_VALUE, convertArea, convertLength, defaultUnit, knownUnits, exportNumber, formatArea, formatCount, formatLength, formatNumber } from '../src/webview/units';
 import { takeoffTable } from '../src/webview/takeoffTable';
 import { UTF8_BOM, csvField, toCsv, toTsv } from '../src/webview/table';

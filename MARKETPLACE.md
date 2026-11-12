@@ -136,6 +136,7 @@ Let an AI agent read the drawing you have open, so you can ask "how many doors a
 **What an agent can do**
 
 - Read the drawing: overview (sheets, layers, block counts), text search, and dimensions — counts, sizes and notes
+- Count and measure: how many of each block, length and area per layer, and distances or room areas measured from the geometry when no dimension is drawn
 - Highlight and zoom in the preview, so you can see what it is talking about
 - Take a snapshot of the view (or a region) to look at it
 

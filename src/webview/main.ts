@@ -21,7 +21,7 @@ import { buildInspector } from './inspector';
 import { SearchControl, buildSearchControl } from './searchPanel';
 import type { SearchHit } from './search';
 import { TakeoffPanel, buildTakeoffPanel } from './takeoffPanel';
-import { EMPTY_TAKEOFF, measureSelection, takeOff } from './takeoff';
+import { EMPTY_TAKEOFF, measureSelection, takeOff } from '../shared/takeoff';
 import { Unit, convertArea, convertLength, defaultUnit, formatArea, formatCount, formatLength, knownUnits } from './units';
 import { UTF8_BOM } from './table';
 import { SHOW_DRAWN_WAIT_MS, type AgentResult, type DrawingDiff, type DrawingKey, type ObjectInfo } from '../shared/types';
