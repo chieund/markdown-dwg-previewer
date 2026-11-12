@@ -98,6 +98,22 @@ function interactionScript(action: string | undefined): string {
         svg.dispatchEvent(new MouseEvent('click', init));
       }`;
   }
+  if (action?.startsWith('measure=')) {
+    // measure=<x1>,<y1>,<x2>,<y2>: press Measure, then click near two drawing points
+    const [x1, y1, x2, y2] = action.slice('measure='.length).split(',').map(Number);
+    return `
+      [...document.querySelectorAll('.dwg-toolbar button')].find((b) => b.textContent === 'Measure')?.click();
+      const svg = document.querySelector('.dwg-canvas svg');
+      const flip = svg.querySelector('g');
+      for (const [x, y] of [[${x1}, ${y1}], [${x2}, ${y2}]]) {
+        const at = new DOMPoint(x, y).matrixTransform(flip.getScreenCTM());
+        const init = { bubbles: true, clientX: at.x, clientY: at.y, button: 0 };
+        svg.dispatchEvent(new MouseEvent('mousemove', init));
+        svg.dispatchEvent(new MouseEvent('mousedown', init));
+        window.dispatchEvent(new MouseEvent('mouseup', init));
+        svg.dispatchEvent(new MouseEvent('click', init));
+      }`;
+  }
   if (action === 'layers') {
     return `document.querySelector('.dwg-layer-button')?.click();`;
   }

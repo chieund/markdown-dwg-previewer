@@ -94,6 +94,8 @@ export class DwgEditorProvider implements vscode.CustomReadonlyEditorProvider {
           if ((message.format === 'svg' || message.format === 'png' || message.format === 'csv') && typeof message.data === 'string') {
             void this.saveExport(document.uri, message.format, message.data);
           }
+        } else if (message?.type === 'CONNECT_AI') {
+          void vscode.commands.executeCommand('dwgPreviewer.connectAgents');
         } else if (message?.type === 'COPY') {
           // A webview can be denied clipboard access; the host is not.
           if (typeof message.text === 'string') void vscode.env.clipboard.writeText(message.text);

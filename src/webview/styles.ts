@@ -116,6 +116,10 @@ export const WEBVIEW_STYLES = `
 
     /* Selection: the drawing fades back and highlighted copies sit on top. */
     .dwg-dimmed { opacity: 0.3; }
+    .dwg-ruler { pointer-events: none; }
+    .dwg-ruler-line { stroke: var(--dwg-focus); stroke-width: 1.5; stroke-dasharray: 6 4; }
+    .dwg-ruler-end { stroke: var(--dwg-focus); stroke-width: 8; stroke-linecap: round; }
+    .dwg-layer-button.dwg-active { border-color: var(--dwg-focus); color: var(--vscode-button-foreground, #ffffff); background: var(--vscode-button-background, #0e639c); }
     .dwg-highlight { pointer-events: none; }
     .dwg-highlight * { stroke: var(--dwg-highlight) !important; }
     .dwg-highlight text { fill: var(--dwg-highlight) !important; stroke: none !important; }

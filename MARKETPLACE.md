@@ -56,6 +56,10 @@ next to the code that parses them.
 - **Quantities** — count every block (`Door-900` × 14) and measure linework and area per layer,
   in the units the drawing declares (or the one you pick, when it declares none); shift-click a
   few objects to add up their length and area, and copy the table straight into a spreadsheet
+- **Measure** — click two points to read the distance between them and its ΔX / ΔY; clicks lock
+  onto corners, so the number is exact
+- **Readable on a dark canvas** — colours drawn for white paper (dark red, navy, black) are
+  lightened just enough to stand out
 - **Compare drawings** — *Compare with HEAD* (Git), *Compare with File…* or two selected files:
   added objects in green, removed in red, changed in yellow over their old shape, with a list of
   every change to step through (F7)
@@ -132,6 +136,8 @@ on an object are kept too. Layers switched off in a DXF start hidden.
 ## Ask AI about your drawing
 
 Let an AI agent read the drawing you have open, so you can ask "how many doors are on this plan?" or "what size is the largest room?" and get an answer from the drawing itself instead of counting by eye.
+
+Press **Ask AI** on the toolbar to connect an agent.
 
 **What an agent can do**
 
