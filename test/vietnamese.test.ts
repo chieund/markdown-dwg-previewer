@@ -83,6 +83,20 @@ test('a windows-1258 file reads TCVN3 bytes that look like Vietnamese letters th
   assert.equal(decodeTcvn3(asRead, false, 'windows-1258'), 'góc từ');
 });
 
+test('an MTEXT mixing a Unicode run and a TCVN3 run reads both', () => {
+  const objects = parseDxf(
+    r2007('0', 'MTEXT', '5', 'A1', '8', '0', '7', 'VN', '10', '0', '20', '0', '30', '0', '40', '1', '1', '{\\fArial|b0;Phòng ngủ}\\P{\\f.VnTime|b0;cöa sæ}')
+  ).objects;
+  assert.equal(objects[0].text, 'Phòng ngủ\ncửa sổ');
+});
+
+test('a Unicode letter AutoCAD set in its own font leaves the TCVN3 text around it to be read', () => {
+  const objects = parseDxf(
+    r2007('0', 'MTEXT', '5', 'A1', '8', '0', '7', 'VN', '10', '0', '20', '0', '30', '0', '40', '1', '1', 'B{\\fTimes New Roman|b0;ƯỚC} 4: thi c«ng')
+  ).objects;
+  assert.equal(objects[0].text, 'BƯỚC 4: thi công');
+});
+
 test('only text drawn in a TCVN3 font is converted', () => {
   const objects = parseDxf(
     withStyles(...entities(...text('A1', 'VN', 'cöa'), ...text('A2', 'STD', 'cöa'), ...text('A3', 'STD', '30×30')))

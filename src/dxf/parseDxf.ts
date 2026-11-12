@@ -1903,12 +1903,19 @@ function toHexColor(truecolor: number): string {
  * - escapes standing for a character: `\P \N \~ \\ \{ \}` and `\U+XXXX`.
  */
 function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith = 'latin1'): string {
-  let out = '';
-  // Text typed as Unicode stays as it is, whatever font it names (see decodeTcvn3).
-  // Judged for the whole MTEXT: one that mixes Unicode and TCVN3 runs keeps its TCVN3 raw.
-  const legacy = !isUnicodeVietnamese(raw, decodedWith);
+  // Output pieces, each tagged with the font span it was written in. A span
+  // runs until the font changes, across formatting codes, and is judged as a
+  // whole: text typed as Unicode in it stays as it is, while a TCVN3 span
+  // beside it is still read (see decodeTcvn3).
+  const pieces: { text: string; span: number; plain: boolean }[] = [];
+  const spanFonts: LegacyFont[] = [baseFont];
   // `\f` switches the font until the `{}` scope it sits in ends.
   let font = baseFont;
+  const setFont = (next: LegacyFont) => {
+    if (next !== font) spanFonts.push(next);
+    font = next;
+  };
+  const emit = (text: string, plain = false) => pieces.push({ text, span: spanFonts.length - 1, plain });
   const scopes: LegacyFont[] = [];
   for (let i = 0; i < raw.length; i++) {
     const ch = raw[i];
@@ -1917,11 +1924,11 @@ function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith = 'lat
       continue;
     }
     if (ch === '}') {
-      if (scopes.length > 0) font = scopes.pop()!;
+      if (scopes.length > 0) setFont(scopes.pop()!);
       continue;
     }
     if (ch !== '\\' || i + 1 >= raw.length) {
-      out += font && legacy ? decodeTcvn3(ch, font === 'tcvn3-caps', decodedWith) : ch;
+      emit(ch, true);
       continue;
     }
 
@@ -1931,15 +1938,15 @@ function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith = 'lat
       case 'P':
       case 'X':
       case 'N':
-        out += '\n';
+        emit('\n');
         break;
       case '~':
-        out += ' ';
+        emit(' ');
         break;
       case '\\':
       case '{':
       case '}':
-        out += code;
+        emit(code);
         break;
       case 'L': case 'l': case 'O': case 'o': case 'K': case 'k':
         break;
@@ -1947,10 +1954,10 @@ function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith = 'lat
       case 'M': {
         const escape = raw.slice(i - 1).match(/^\\(U\+[0-9A-Fa-f]{4}|M\+[1-5][0-9A-Fa-f]{4})/);
         if (escape) {
-          out += decodeTextValue(escape[0], false);
+          emit(decodeTextValue(escape[0], false));
           i += escape[0].length - 2;
         } else {
-          out += code;
+          emit(code);
         }
         break;
       }
@@ -1958,7 +1965,7 @@ function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith = 'lat
         // Stacked text: numerator and denominator split by ^, / or #.
         const end = raw.indexOf(';', i + 1);
         const body = raw.slice(i + 1, end < 0 ? raw.length : end);
-        out += body.replace(/\\(.)/g, '$1').split(/[\^/#]/).map((part) => part.trim()).filter(Boolean).join('/');
+        emit(body.replace(/\\(.)/g, '$1').split(/[\^/#]/).map((part) => part.trim()).filter(Boolean).join('/'));
         i = end < 0 ? raw.length : end;
         break;
       }
@@ -1966,13 +1973,26 @@ function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith = 'lat
         // Formatting codes with an argument (\f, \H, \W, \Q, \T, \A, \C, \c, \p …)
         if (/[A-Za-z]/.test(code)) {
           const end = raw.indexOf(';', i + 1);
-          if (code === 'f' || code === 'F') font = legacyFontOf(raw.slice(i + 1, end < 0 ? raw.length : end).split('|')[0]);
+          if (code === 'f' || code === 'F') setFont(legacyFontOf(raw.slice(i + 1, end < 0 ? raw.length : end).split('|')[0]));
           i = end < 0 ? raw.length : end;
         } else {
-          out += code;
+          emit(code);
         }
       }
     }
+  }
+  // A span is judged on its own letters. AutoCAD writes a Unicode letter the
+  // TCVN3 font lacks in a font of its own ("Kh{\\fTimes;ổ} TT"), so the span
+  // around it is still TCVN3 and drawn as such, capitals included.
+  const plainText = spanFonts.map(() => '');
+  for (const piece of pieces) if (piece.plain) plainText[piece.span] += piece.text;
+  const unicode = plainText.map((plain) => isUnicodeVietnamese(plain, decodedWith));
+  let out = '';
+  for (const piece of pieces) {
+    const spanFont = spanFonts[piece.span];
+    out += piece.plain && spanFont && !unicode[piece.span]
+      ? decodeTcvn3(piece.text, spanFont === 'tcvn3-caps', decodedWith)
+      : piece.text;
   }
   return decodePercentCodes(out);
 }
