@@ -5,7 +5,7 @@ import type { DiskCache } from './diskCache';
 export type { DrawingKey };
 
 /** Bump whenever parser output changes, so stale disk caches are ignored. */
-export const CACHE_FORMAT = 1;
+export const CACHE_FORMAT = 2;
 
 export interface StoredDrawing {
   key: DrawingKey;

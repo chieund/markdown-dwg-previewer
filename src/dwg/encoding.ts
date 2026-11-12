@@ -45,7 +45,7 @@ export function decodeDxfBuffer(buffer: Uint8Array): string {
   const version = headerValue(head, '$ACADVER');
   if (version && version >= 'AC1021') return new TextDecoder('utf-8').decode(body);
 
-  const encoding = legacyEncodingOf(head) ?? 'windows-1252';
+  const encoding = legacyEncodingOf(head);
   try {
     return new TextDecoder(encoding).decode(body);
   } catch {
@@ -54,13 +54,15 @@ export function decodeDxfBuffer(buffer: Uint8Array): string {
 }
 
 /**
- * The single-byte label a legacy (pre-R2007) DXF was read with, from its header
- * text, or `null` for R2007+ files: their text is Unicode, so there are no
- * TCVN3 bytes to map back and a `.Vn*` style must not corrupt it.
+ * The single-byte label a DXF's text maps back to bytes with, from its header
+ * text: the code page it declares, or `'latin1'` for R2007+ files. Those are
+ * Unicode, but text drawn in a TCVN3 font (`.VnTime` …) still holds the TCVN3
+ * byte values as U+0080–U+00FF characters, and every DWG is converted to an
+ * R2007 DXF, so they must be decoded too.
  */
-export function legacyEncodingOf(dxfHead: string): string | null {
+export function legacyEncodingOf(dxfHead: string): string {
   const version = headerValue(dxfHead, '$ACADVER');
-  if (version && version >= 'AC1021') return null;
+  if (version && version >= 'AC1021') return 'latin1';
   const codepage = headerValue(dxfHead, '$DWGCODEPAGE')?.toUpperCase();
   return (codepage && CODE_PAGES[codepage]) || 'windows-1252';
 }

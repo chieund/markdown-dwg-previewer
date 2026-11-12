@@ -35,7 +35,7 @@ import AUTO_CAD_COLOR_INDEX from 'dxf-parser/dist/AutoCadColorIndex';
 import { expandBulges } from './bulge';
 import { scanBlockNames } from './blockNames';
 import { HEADER_SNIFF_BYTES, legacyEncodingOf } from '../dwg/encoding';
-import { LegacyFont, decodeTcvn3, legacyFontOf } from './vietnamese';
+import { LegacyFont, decodeTcvn3, isUnicodeVietnamese, legacyFontOf } from './vietnamese';
 import { EntityExtras, Vector3D, scanEntityExtras } from './extras';
 import { scanHatches } from './hatch';
 import {
@@ -135,8 +135,8 @@ interface ParseContext {
   textStyles: Record<string, string>;
   /** Text style name (upper case) → the font file it names, for telling TCVN3 text apart. */
   fontFiles: Record<string, string>;
-  /** The single-byte code page the file's text was read with; TCVN3 bytes are recovered through it. Null for Unicode (R2007+) files. */
-  legacyEncoding: string | null;
+  /** The single-byte code page the file's text was read with; TCVN3 bytes are recovered through it. */
+  legacyEncoding: string;
   /** Extrusion, text style and file position per entity handle. */
   extras: EntityExtras;
   /** Anonymous block name → the block it is a representation of. */
@@ -1871,7 +1871,7 @@ function textLegacyFont(raw: IEntity, context: Pick<ParseContext, 'extras' | 'te
 
 /** Text drawn in a TCVN3 font, read as the Vietnamese it stands for. */
 function readLegacy(text: string, font: LegacyFont, context: Pick<ParseContext, 'legacyEncoding'>): string {
-  return font && context.legacyEncoding ? decodeTcvn3(text, font === 'tcvn3-caps', context.legacyEncoding) : text;
+  return font ? decodeTcvn3(text, font === 'tcvn3-caps', context.legacyEncoding) : text;
 }
 
 /**
@@ -1902,8 +1902,10 @@ function toHexColor(truecolor: number): string {
  * - codes whose argument runs to a semicolon: `\f \H \C \S` …
  * - escapes standing for a character: `\P \N \~ \\ \{ \}` and `\U+XXXX`.
  */
-function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith: string | null = 'latin1'): string {
+function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith = 'latin1'): string {
   let out = '';
+  // Text typed as Unicode stays as it is, whatever font it names (see decodeTcvn3)
+  const legacy = !isUnicodeVietnamese(raw);
   // `\f` switches the font until the `{}` scope it sits in ends.
   let font = baseFont;
   const scopes: LegacyFont[] = [];
@@ -1918,7 +1920,7 @@ function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith: strin
       continue;
     }
     if (ch !== '\\' || i + 1 >= raw.length) {
-      out += font && decodedWith ? decodeTcvn3(ch, font === 'tcvn3-caps', decodedWith) : ch;
+      out += font && legacy ? decodeTcvn3(ch, font === 'tcvn3-caps', decodedWith) : ch;
       continue;
     }
 

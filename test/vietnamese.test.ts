@@ -47,21 +47,34 @@ test('font files are recognised', () => {
 });
 test('the encoding a file was read with follows its header', () => {
   const head = (...vars: string[]) => dxf('0', 'SECTION', '2', 'HEADER', ...vars, '0', 'ENDSEC');
-  assert.equal(legacyEncodingOf(head('9', '$ACADVER', '1', 'AC1021')), null);
+  assert.equal(legacyEncodingOf(head('9', '$ACADVER', '1', 'AC1021')), 'latin1');
   assert.equal(legacyEncodingOf(head('9', '$ACADVER', '1', 'AC1015', '9', '$DWGCODEPAGE', '3', 'ANSI_1258')), 'windows-1258');
   assert.equal(legacyEncodingOf(head('9', '$ACADVER', '1', 'AC1015')), 'windows-1252');
 });
 
-test('R2007+ text is Unicode, so a .Vn* style is not decoded as TCVN3 again', () => {
-  const src = dxf(
+/** An R2007 (Unicode) DXF, which is also what every DWG is converted to. */
+const r2007 = (...body: string[]) =>
+  dxf(
     '0', 'SECTION', '2', 'HEADER', '9', '$ACADVER', '1', 'AC1021', '0', 'ENDSEC',
     '0', 'SECTION', '2', 'TABLES', '0', 'TABLE', '2', 'STYLE',
     ...style('VN', '.VnTime'),
     '0', 'ENDTAB', '0', 'ENDSEC',
-    ...entities(...text('A1', 'VN', 'cöa')),
+    ...entities(...body),
     '0', 'EOF'
   );
-  assert.equal(parseDxf(src).objects[0].text, 'cöa');
+
+test('TCVN3 text in an R2007+ file is still read as Vietnamese', () => {
+  const objects = parseDxf(
+    r2007(...text('A1', 'VN', 'cöa'), '0', 'MTEXT', '5', 'A2', '8', '0', '7', 'VN', '10', '0', '20', '0', '30', '0', '40', '1', '1', 'MÆt b»ng')
+  ).objects;
+  assert.deepEqual(objects.map((o) => o.text), ['cửa', 'Mặt bằng']);
+});
+
+test('text typed as Unicode keeps its letters even in a TCVN3 font', () => {
+  const objects = parseDxf(
+    r2007(...text('A1', 'VN', 'Ghi chú cửa sổ'), '0', 'MTEXT', '5', 'A2', '8', '0', '7', 'VN', '10', '0', '20', '0', '30', '0', '40', '1', '1', 'Mặt bằng tầng 2')
+  ).objects;
+  assert.deepEqual(objects.map((o) => o.text), ['Ghi chú cửa sổ', 'Mặt bằng tầng 2']);
 });
 
 test('only text drawn in a TCVN3 font is converted', () => {
