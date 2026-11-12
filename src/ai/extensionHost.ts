@@ -10,6 +10,7 @@ import { createAccessCheck } from './access';
 import { WindowRegistry } from './windows';
 import { startMcpServer, type RunningServer } from './server';
 import { getOrCreateToken } from './tokenStore';
+import { FILE_AGENTS, connectFileAgent, disconnectFileAgent, refreshFileAgent, type FileAgent } from './agentConfig';
 import {
   CLAUDE_EXTENSION_ID, MCP_DOCS_URL, SERVER_NAME, authorizationHeader, claudeAddCommandText, claudeRemoveArgs, connectClaude, disconnectClaude, findClaudeCli,
   isServerNotFound, lookupCommand, outsideDir,
@@ -355,14 +356,66 @@ export function startAiFeature(
   };
   subs.push(definitionsChanged.event(() => void reconnectIfNeeded()));
 
+  async function connectFile(agent: FileAgent): Promise<void> {
+    await ensureStarted();
+    const cur = current();
+    if (!cur) {
+      void vscode.window.showWarningMessage(notRunningMessage());
+      return;
+    }
+    try {
+      const file = await connectFileAgent(agent, cur.url, cur.token);
+      log(`Connected ${agent.name} in ${file}`);
+      void vscode.window.showInformationMessage(
+        `Connected ${agent.name}: added "${SERVER_NAME}" to ${file}. If ${agent.name} is already open, reload its MCP servers or restart it.`
+      );
+    } catch (err) {
+      void vscode.window.showErrorMessage(`Could not connect ${agent.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  async function disconnectFile(agent: FileAgent): Promise<void> {
+    try {
+      const removed = await disconnectFileAgent(agent);
+      void vscode.window.showInformationMessage(removed ? `Disconnected ${agent.name}.` : `${agent.name} was not connected.`);
+    } catch (err) {
+      void vscode.window.showErrorMessage(`Could not disconnect ${agent.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Cursor and Kiro read a fixed address from their file: keep one that was connected up to date.
+  subs.push(
+    definitionsChanged.event(() => {
+      const cur = current();
+      if (!cur) return;
+      for (const agent of FILE_AGENTS) {
+        refreshFileAgent(agent, cur.url, cur.token).then(
+          (changed) => changed && log(`Updated ${agent.name} after the server address changed`),
+          (err) => log(`Updating ${agent.name} failed: ${String(err)}`)
+        );
+      }
+    })
+  );
+
   subs.push(
     vscode.commands.registerCommand('dwgPreviewer.connectAgents', async () => {
+      const fileAgent = (prefix: string, pick: string | undefined) => FILE_AGENTS.find((a) => pick === `${prefix} ${a.name}`);
       const pick = await vscode.window.showQuickPick(
-        ['Connect Claude Code', 'Disconnect Claude Code', 'Show setup for other agents'],
+        [
+          'Connect Claude Code',
+          ...FILE_AGENTS.map((a) => `Connect ${a.name}`),
+          'Disconnect Claude Code',
+          ...FILE_AGENTS.map((a) => `Disconnect ${a.name}`),
+          'Show setup for other agents',
+        ],
         { placeHolder: 'Connect AI agents to the drawing tools' }
       );
+      const connecting = fileAgent('Connect', pick);
+      const disconnecting = fileAgent('Disconnect', pick);
       if (pick === 'Connect Claude Code') await connect();
       else if (pick === 'Disconnect Claude Code') await disconnect();
+      else if (connecting) await connectFile(connecting);
+      else if (disconnecting) await disconnectFile(disconnecting);
       else if (pick) {
         await ensureStarted();
         const cur = current();
@@ -372,7 +425,7 @@ export function startAiFeature(
         }
         // The token is never written into a document (untitled documents can be backed up to disk).
         const choice = await vscode.window.showInformationMessage(
-          `Other agents (Kiro and others) connect to a remote HTTP MCP server (name it "${SERVER_NAME}"). The JSON format differs per agent, so check your agent's MCP documentation and give it this URL and an Authorization header.`,
+          `Other agents connect to a remote HTTP MCP server (name it "${SERVER_NAME}"). The JSON format differs per agent, so check your agent's MCP documentation and give it this URL and an Authorization header.`,
           'Copy URL',
           'Copy Authorization header'
         );

@@ -87,6 +87,7 @@ The extension runs a local [Model Context Protocol](https://modelcontextprotocol
 |-------|-----|
 | Claude Code | Run **DWG: Connect AI Agents…** (or accept the prompt the first time you open a drawing; it only appears when Claude Code is installed). This runs `claude mcp add` for you and registers the server as `dwg-previewer`. |
 | GitHub Copilot | Automatic on VS Code 1.101 or newer. The tools appear in Copilot Chat agent mode; the first use in a session may take a moment while the server starts. |
+| Cursor, Kiro | Run **DWG: Connect AI Agents…** and pick **Connect Cursor** or **Connect Kiro**. This adds `dwg-previewer` to `~/.cursor/mcp.json` or `~/.kiro/settings/mcp.json`, keeping your other servers; a file with comments is left alone. Kiro picks it up at once; Cursor may need its MCP servers reloaded. |
 | Other agents | Run **DWG: Connect AI Agents…** and copy the URL and the `Authorization` header. Add them to the agent's MCP settings; the config format differs per agent, see its MCP documentation. |
 
 **Which files an agent can read.** Drawings in your workspace folders and drawings open in a preview are free. Any other `.dwg` / `.dxf` needs your click on a modal **Allow** prompt first.
