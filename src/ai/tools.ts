@@ -363,6 +363,9 @@ function overview(stored: StoredDrawing, file: string): ToolContent[] {
   return [{ type: 'text', text: json }];
 }
 
+/** Objects whose drawn text is listed as theirs: a block's labels, a table's cells. */
+const TEXT_OWNERS = new Set(['INSERT', 'ACAD_TABLE']);
+
 type TextHit =
   | { kind: 'object'; id: number }
   | { kind: 'nested'; owner: number; page: number; entity: TextEntity };
@@ -395,7 +398,7 @@ function findText(stored: StoredDrawing, args: Args): ToolContent[] {
     for (const entity of p.entities) {
       if (entity.type !== 'TEXT' || !entity.text || entity.obj === undefined) continue;
       const owner = stored.parsed.objects[entity.obj];
-      if (!owner || owner.type !== 'INSERT' || owner.empty) continue;
+      if (!owner || !TEXT_OWNERS.has(owner.type) || owner.empty) continue;
       // A drawn ATTRIB is text of its INSERT too, but the INSERT's own match already lists it
       if (owner.attributes?.some((a) => !a.hidden && a.value === entity.text)) continue;
       if (!want(entity.text, pageIndex, entity.layer)) continue;

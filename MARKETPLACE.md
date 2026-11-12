@@ -111,7 +111,7 @@ as wireframe.
 
 **A drawing looks incomplete — why?**
 The toolbar shows a banner naming every entity type in the drawing that this viewer can't draw
-yet — LEADER, MULTILEADER, TABLE, WIPEOUT and 3D solids are the common ones. Objects hidden in the file
+yet — WIPEOUT and 3D solids are the common ones. Objects hidden in the file
 itself — invisible attributes, hidden dynamic-block states — are left out on purpose, as in
 AutoCAD. Please report drawings that look wrong.
 
@@ -126,6 +126,7 @@ AutoCAD. Please report drawings that look wrong.
 | **Text** | TEXT · MTEXT · ATTRIB — with fonts, alignment and rotation |
 | **Blocks** | INSERT — nested, rotated, mirrored, scaled, and grid arrays (mirrored arcs, circles, polylines, text and hatches too) |
 | **Dimensions** | DIMENSION — drawn as AutoCAD laid it out: dimension and extension lines, arrowheads, text |
+| **Notes** | TABLE (schedules, cell text included) · MULTILEADER callouts · LEADER with arrowheads |
 | **Other** | POINT · 3DFACE · viewports on paper-space sheets |
 
 Layers keep their colors and linetypes from the original drawing; line weights set directly

@@ -116,9 +116,10 @@ The format is detected from the file header, so a DWG saved as `.dxf` still open
 | Text | TEXT · MTEXT · ATTRIB — with fonts, alignment and rotation |
 | Blocks | INSERT (nested, rotated, mirrored, scaled, grid arrays) |
 | Dimensions | DIMENSION — dimension and extension lines, arrowheads, text |
+| Notes | TABLE (schedules, with their cell text) · MULTILEADER callouts · LEADER with arrowheads |
 | Other | POINT · 3DFACE (flattened wireframe) · paper-space viewports |
 
-This is a 2D viewer: 3D solids are not drawn. The toolbar names every entity type in a drawing that it cannot draw yet (LEADER, MULTILEADER, TABLE, WIPEOUT and 3D solids are the common ones).
+This is a 2D viewer: 3D solids are not drawn. The toolbar names every entity type in a drawing that it cannot draw yet (WIPEOUT and 3D solids are the common ones).
 
 ## Keyboard and mouse
 
