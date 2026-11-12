@@ -56,8 +56,8 @@ next to the code that parses them.
 - **Quantities** — count every block (`Door-900` × 14) and measure linework and area per layer,
   in the units the drawing declares (or the one you pick, when it declares none); shift-click a
   few objects to add up their length and area, and copy the table straight into a spreadsheet
-- **Measure** — click two points to read the distance between them and its ΔX / ΔY; clicks lock
-  onto corners, so the number is exact
+- **Measure** — click two points for the distance and its ΔX / ΔY, or more points for the length
+  and the area they enclose; clicks lock onto corners, so the number is exact
 - **Readable on a dark canvas** — colours drawn for white paper (dark red, navy, black) are
   lightened just enough to stand out
 - **Compare drawings** — *Compare with HEAD* (Git), *Compare with File…* or two selected files:

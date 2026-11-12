@@ -2,6 +2,7 @@
  * The click-two-points ruler: where a click lands, and what the pair measures.
  * Kept free of the DOM so it can be tested.
  */
+import { pathLength, polygonArea } from '../dxf/measure';
 import type { DxfEntity, Point2D } from '../shared/types';
 
 /** Corners and centres a click can lock onto: line ends, polyline corners, circle and arc centres, points. */
@@ -65,4 +66,23 @@ export function rulerBetween(a: Point2D, b: Point2D): Ruler {
   const dx = Math.abs(b.x - a.x);
   const dy = Math.abs(b.y - a.y);
   return { distance: Math.hypot(dx, dy), dx, dy };
+}
+
+export type RulerReading =
+  | ({ kind: 'distance' } & Ruler)
+  | { kind: 'shape'; corners: number; length: number; perimeter: number; area: number };
+
+/**
+ * What the clicked points measure, with the cursor as a next point while one
+ * is being placed: a distance for two points, a path and the area it closes
+ * for three or more. Nothing before the first click.
+ */
+export function measureRuler(points: Point2D[], hover?: Point2D): RulerReading | undefined {
+  const last = points[points.length - 1];
+  // Right after a click the cursor still sits on the corner it added
+  const moving = hover && !(last && hover.x === last.x && hover.y === last.y);
+  const all = moving ? [...points, hover] : points;
+  if (points.length === 0 || all.length < 2) return undefined;
+  if (all.length === 2) return { kind: 'distance', ...rulerBetween(all[0], all[1]) };
+  return { kind: 'shape', corners: all.length, length: pathLength(all, false), perimeter: pathLength(all, true), area: polygonArea(all) };
 }

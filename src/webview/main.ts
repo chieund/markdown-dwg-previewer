@@ -39,7 +39,7 @@ import {
 } from './agent';
 import { renderDiff } from './diffView';
 import { legibleColor } from './contrast';
-import { rulerBetween, snapPoint } from './measureTool';
+import { measureRuler, snapPoint } from './measureTool';
 
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void };
 
@@ -248,7 +248,7 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
     const point = clientToViewBox(svg, event.clientX, event.clientY);
     // The scene is drawn through a scale(1,-1) flip, so undo it for display.
     cursorPoint = { x: point.x, y: -point.y };
-    if (measuring?.points.length === 1) {
+    if (measuring && measuring.points.length > 0) {
       // Following the cursor must stay smooth: on a huge sheet only the click itself snaps
       measuring.hover = page.entities.length > HOVER_SNAP_LIMIT ? cursorPoint : snapToDrawing(svg, page, cursorPoint).point;
       drawRuler();
@@ -257,6 +257,10 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
   });
   svg.addEventListener('mouseleave', () => {
     cursorPoint = null;
+    if (measuring) {
+      measuring.hover = undefined;
+      drawRuler();
+    }
     updateStatusBar();
   });
 
@@ -276,7 +280,9 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
       const at = clientToViewBox(svg, event.clientX, event.clientY);
       const { point } = snapToDrawing(svg, page, { x: at.x, y: -at.y });
       // A third click starts the next measurement
-      measuring = { points: measuring.points.length === 1 ? [measuring.points[0], point] : [point] };
+      // Each click adds a corner; the same corner twice (a double-click) adds one
+      const last = measuring.points[measuring.points.length - 1];
+      if (!last || last.x !== point.x || last.y !== point.y) measuring.points.push(point);
       drawRuler();
       updateStatusBar();
       return;
@@ -409,26 +415,28 @@ function snapToDrawing(svg: SVGSVGElement, page: DxfPage, point: Point2D): { poi
   return snapPoint(page.entities, scene?.hiddenLayers ?? new Set(), point, SNAP_RADIUS_PX * unitsPerPixel(svg));
 }
 
-/** Draws the ruler's points and the line between them (or to the cursor while placing the second). */
+/**
+ * Draws the ruler: its corners, the path through them and on to the cursor,
+ * and from three corners on the closed shape whose area is reported.
+ */
 function drawRuler(): void {
   if (!measureGroup) return;
   measureGroup.textContent = '';
   if (!measuring || measuring.points.length === 0) return;
-  const [a, b = measuring.hover] = measuring.points;
-  const segment = (from: Point2D, to: Point2D, className: string) => {
-    const line = document.createElementNS(SVG_NS, 'line');
-    line.setAttribute('x1', String(from.x));
-    line.setAttribute('y1', String(from.y));
-    line.setAttribute('x2', String(to.x));
-    line.setAttribute('y2', String(to.y));
-    line.setAttribute('class', className);
-    line.setAttribute('vector-effect', 'non-scaling-stroke');
-    measureGroup!.appendChild(line);
+  const points = measuring.points;
+  const add = (tag: string, className: string, attrs: Record<string, string>) => {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    el.setAttribute('class', className);
+    el.setAttribute('vector-effect', 'non-scaling-stroke');
+    measureGroup!.appendChild(el);
   };
-  if (b) segment(a, b, 'dwg-ruler-line');
+  const list = (ps: Point2D[]) => ps.map((p) => `${p.x},${p.y}`).join(' ');
+  if (points.length >= 3) add('polygon', 'dwg-ruler-area', { points: list(points) });
+  const path = measuring.hover ? [...points, measuring.hover] : points;
+  if (path.length >= 2) add('polyline', 'dwg-ruler-line', { points: list(path) });
   // A zero-length round-capped stroke is a dot that keeps its size at any zoom
-  segment(a, a, 'dwg-ruler-end');
-  if (b && measuring.points.length === 2) segment(b, b, 'dwg-ruler-end');
+  for (const p of points) add('line', 'dwg-ruler-end', { x1: String(p.x), y1: String(p.y), x2: String(p.x), y2: String(p.y) });
 }
 
 function setMeasuring(on: boolean): void {
@@ -445,7 +453,7 @@ function buildMeasureButton(): HTMLElement {
   const button = document.createElement('button');
   button.className = 'dwg-layer-button';
   button.textContent = 'Measure';
-  button.title = 'Measure the distance between two points (clicks lock onto corners). Esc to finish.';
+  button.title = 'Measure distances and areas: click points (they lock onto corners). Esc to start over.';
   button.setAttribute('aria-pressed', String(!!measuring));
   button.classList.toggle('dwg-active', !!measuring);
   button.addEventListener('click', () => setMeasuring(!measuring));
@@ -662,25 +670,26 @@ function updateStatusBar(): void {
   }
 
   if (measuring) {
-    const [a, b] = measuring.points;
-    const to = b ?? measuring.hover;
-    if (a && to) {
-      const ruler = rulerBetween(a, to);
-      const insunits = drawingUnits();
-      // A zero leg is an answer (the points are level), not a missing value
-      const show = (value: number) => (value === 0 ? '0' : formatLength(convertLength(value, insunits, outputUnit), outputUnit));
-      statusBar.appendChild(
-        span(`Distance ${show(ruler.distance)} · ΔX ${show(ruler.dx)} · ΔY ${show(ruler.dy)}`, 'dwg-status-selection')
-      );
-    } else {
-      statusBar.appendChild(span('Measure: click the first point', 'dwg-status-selection'));
+    const insunits = drawingUnits();
+    // A zero leg is an answer (the points are level), not a missing value
+    const show = (value: number) => (value === 0 ? '0' : formatLength(convertLength(value, insunits, outputUnit), outputUnit));
+    const ruler = measureRuler(measuring.points, measuring.hover);
+    let text = 'Measure: click the first point';
+    if (ruler?.kind === 'distance') {
+      text = `Distance ${show(ruler.distance)} · ΔX ${show(ruler.dx)} · ΔY ${show(ruler.dy)}`;
+    } else if (ruler?.kind === 'shape') {
+      const area = convertArea(ruler.area, insunits, outputUnit);
+      text = `${ruler.corners} points · length ${show(ruler.length)} · closed ${show(ruler.perimeter)} · area ${area === 0 ? '0' : formatArea(area, outputUnit)}`;
     }
+    statusBar.appendChild(span(text, 'dwg-status-selection'));
   }
 
   statusBar.appendChild(span('', 'dwg-status-spacer'));
   statusBar.appendChild(
     span(
-      measuring ? 'Click two points · clicks lock onto corners · Esc = finish' : 'Scroll = zoom · Drag = pan · Double-click = fit',
+      measuring
+        ? 'Click points (they lock onto corners) · 3+ points give an area · Backspace = undo · Esc = start over'
+        : 'Scroll = zoom · Drag = pan · Double-click = fit',
       'dwg-status-hint'
     )
   );
@@ -1349,10 +1358,15 @@ window.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && searchControl) {
     event.preventDefault();
     searchControl.open();
+  } else if (event.key === 'Backspace' && measuring?.points.length && !(event.target instanceof HTMLInputElement)) {
+    measuring.points.pop();
+    drawRuler();
+    updateStatusBar();
   } else if (event.key === 'Escape') {
     // Innermost first: the search, then the selection and its inspector, then the panel
     if (searchControl?.isOpen()) searchControl.close();
-    else if (measuring) setMeasuring(false);
+    // A measurement in progress is cleared first, then the tool is left
+    else if (measuring) setMeasuring(measuring.points.length > 0);
     else if (selection.length || inspector) clearSelection();
     else if (takeoffPanel) closeTakeoffPanel();
   }

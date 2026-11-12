@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { contrastOnCanvas, legibleColor } from '../src/webview/contrast';
-import { rulerBetween, snapPoint } from '../src/webview/measureTool';
+import { measureRuler, rulerBetween, snapPoint } from '../src/webview/measureTool';
 import type { DxfEntity } from '../src/shared/types';
 
 const rgb = (hex: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
@@ -52,4 +52,14 @@ test('the nearest corner wins, and hidden layers do not attract', () => {
 
 test('a ruler gives the distance and its two legs', () => {
   assert.deepEqual(rulerBetween({ x: 0, y: 0 }, { x: -3, y: 4 }), { distance: 5, dx: 3, dy: 4 });
+});
+
+test('the ruler reads nothing, then a distance, then a closed shape', () => {
+  assert.equal(measureRuler([]), undefined);
+  assert.equal(measureRuler([{ x: 0, y: 0 }]), undefined);
+  assert.deepEqual(measureRuler([{ x: 0, y: 0 }], { x: 3, y: 4 }), { kind: 'distance', distance: 5, dx: 3, dy: 4 });
+  const room = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }];
+  assert.deepEqual(measureRuler(room, { x: 0, y: 3 }), { kind: 'shape', corners: 4, length: 11, perimeter: 14, area: 12 });
+  assert.deepEqual(measureRuler(room), { kind: 'shape', corners: 3, length: 7, perimeter: 12, area: 6 });
+  assert.deepEqual(measureRuler(room, { x: 4, y: 3 }), measureRuler(room), 'the cursor on the last corner adds nothing');
 });
