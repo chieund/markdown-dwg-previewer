@@ -8,7 +8,10 @@
 .vscode/**
 .claude/**
 node_modules/**
-!node_modules/@mlightcad/libredwg-web/**
+# Only the WASM build is loaded; package.json marks its .js as an ES module.
+!node_modules/@mlightcad/libredwg-web/package.json
+!node_modules/@mlightcad/libredwg-web/wasm/**
+node_modules/@mlightcad/libredwg-web/wasm/*.d.ts
 
 src/**
 test/**
