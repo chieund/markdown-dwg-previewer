@@ -195,7 +195,7 @@
     "preview": "node esbuild.js && node esbuild.js --preview && node out-test/preview.js"
   },
   "dependencies": {
-    "@mlightcad/libredwg-web": "^0.7.14",
+    "@mlightcad/libredwg-web": "0.8.8",
     "@modelcontextprotocol/sdk": "1.32.1"
   },
   "devDependencies": {
