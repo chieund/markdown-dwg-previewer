@@ -229,13 +229,8 @@ function parseEdge(edgeType: number, body: Pair[]): Point2D[] {
       const cy = at(20);
       const radius = at(40);
       if (cx === undefined || cy === undefined || radius === undefined) return [];
-      return sampleArc(
-        { x: cx, y: cy },
-        radius,
-        ((at(50) ?? 0) * Math.PI) / 180,
-        ((at(51) ?? 360) * Math.PI) / 180,
-        at(73) !== 0
-      );
+      const { start, sweep } = edgeSweep(at(50) ?? 0, at(51) ?? 360, at(73) !== 0);
+      return sampleArc({ x: cx, y: cy }, radius, start, sweep);
     }
     case 3: {
       // Elliptic arc: centre (10,20), major axis vector (11,21), ratio 40.
@@ -245,14 +240,8 @@ function parseEdge(edgeType: number, body: Pair[]): Point2D[] {
       const my = at(21);
       const ratio = at(40) ?? 1;
       if ([cx, cy, mx, my].some((n) => n === undefined)) return [];
-      return sampleEllipse(
-        { x: cx!, y: cy! },
-        { x: mx!, y: my! },
-        ratio,
-        ((at(50) ?? 0) * Math.PI) / 180,
-        ((at(51) ?? 360) * Math.PI) / 180,
-        at(73) !== 0
-      );
+      const { start, sweep } = edgeSweep(at(50) ?? 0, at(51) ?? 360, at(73) !== 0, ratio);
+      return sampleEllipse({ x: cx!, y: cy! }, { x: mx!, y: my! }, ratio, start, sweep);
     }
     case 4: {
       // Spline: degree 94, knots 40, control points 10/20.
@@ -269,20 +258,41 @@ function parseEdge(edgeType: number, body: Pair[]): Point2D[] {
   }
 }
 
-function sampleArc(
-  center: Point2D,
-  radius: number,
-  startAngle: number,
-  endAngle: number,
-  counterClockwise: boolean
-): Point2D[] {
-  let sweep = endAngle - startAngle;
+/**
+ * Where a boundary arc starts and how far it turns, in radians (negative =
+ * clockwise). DXF stores a clockwise edge (73 = 0) with its angles mirrored:
+ * 0..120 clockwise runs from 0° to -120°, not the long way round from 0° to
+ * 120°. An elliptic edge's angles are geometric (the direction from the
+ * centre), so with a `ratio` they are turned into ellipse parameters.
+ */
+export function edgeSweep(
+  startDeg: number,
+  endDeg: number,
+  counterClockwise: boolean,
+  ratio?: number
+): { start: number; sweep: number } {
+  const span = endDeg - startDeg;
+  const fullTurn = span !== 0 && Math.abs(span) % 360 === 0;
+  const sign = counterClockwise ? 1 : -1;
+  const toAngle = (deg: number) => {
+    const a = (sign * deg * Math.PI) / 180;
+    // On an ellipse, the parameter whose point lies in direction a from the centre
+    return ratio ? Math.atan2(Math.sin(a) / ratio, Math.cos(a)) : a;
+  };
+  const start = toAngle(startDeg);
+  if (fullTurn) return { start, sweep: sign * Math.PI * 2 };
+  let sweep = toAngle(endDeg) - start;
   if (counterClockwise) {
     while (sweep <= 0) sweep += Math.PI * 2;
+    while (sweep > Math.PI * 2) sweep -= Math.PI * 2;
   } else {
     while (sweep >= 0) sweep -= Math.PI * 2;
+    while (sweep < -Math.PI * 2) sweep += Math.PI * 2;
   }
+  return { start, sweep };
+}
 
+function sampleArc(center: Point2D, radius: number, startAngle: number, sweep: number): Point2D[] {
   const segments = Math.max(
     2,
     Math.ceil((Math.abs(sweep) / (Math.PI * 2)) * ARC_SEGMENTS_PER_TURN)
@@ -298,21 +308,7 @@ function sampleArc(
   return points;
 }
 
-function sampleEllipse(
-  center: Point2D,
-  major: Point2D,
-  ratio: number,
-  startAngle: number,
-  endAngle: number,
-  counterClockwise: boolean
-): Point2D[] {
-  let sweep = endAngle - startAngle;
-  if (counterClockwise) {
-    while (sweep <= 0) sweep += Math.PI * 2;
-  } else {
-    while (sweep >= 0) sweep -= Math.PI * 2;
-  }
-
+function sampleEllipse(center: Point2D, major: Point2D, ratio: number, startAngle: number, sweep: number): Point2D[] {
   const segments = Math.max(
     4,
     Math.ceil((Math.abs(sweep) / (Math.PI * 2)) * ARC_SEGMENTS_PER_TURN)

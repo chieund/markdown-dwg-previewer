@@ -126,6 +126,45 @@ test('an invisible attribute is not drawn', () => {
   assert.deepEqual(modelEntities(text).filter((e) => e.type === 'TEXT').map((e) => (e as TextEntity).text), ['SHOWN']);
 });
 
+test('an attribute keeps its own fields when an Xrecord and an embedded MTEXT object follow (issue #4)', () => {
+  const text = withLayers(
+    [layer('0', 7), layer('TEST', 7)],
+    ...entities(
+      '0', 'INSERT', '8', '0', '66', '1', '2', 'NOPE', '10', '0', '20', '0', '30', '0',
+      '0', 'ATTRIB', '8', 'TEST',
+      '100', 'AcDbText', '10', '5', '20', '7', '30', '0', '40', '2.5', '1', 'LABEL',
+      '100', 'AcDbAttribute', '2', 'NAME', '70', '0',
+      '100', 'AcDbXrecord', '280', '1', '40', '1e307',
+      '101', 'Embedded Object', '10', '1e307', '20', '-1e307', '40', '1e307', '1', 'WRONG', '8', 'OTHER',
+      '0', 'SEQEND', '8', '0'
+    )
+  );
+
+  const attribs = modelEntities(text).filter((e): e is TextEntity => e.type === 'TEXT');
+  assert.equal(attribs.length, 1);
+  assert.equal(attribs[0].text, 'LABEL');
+  assert.deepEqual(attribs[0].position, { x: 5, y: 7 });
+  assert.equal(attribs[0].height, 2.5);
+  assert.equal(attribs[0].layer, 'TEST');
+});
+
+test('an R12 attribute without subclass markers still reads every field', () => {
+  const text = withLayers(
+    [layer('0', 7), layer('TEST', 7)],
+    ...entities(
+      '0', 'INSERT', '8', '0', '66', '1', '2', 'NOPE', '10', '0', '20', '0', '30', '0',
+      '0', 'ATTRIB', '8', 'TEST', '10', '5', '20', '7', '30', '0', '40', '2.5', '1', 'LABEL', '2', 'NAME', '70', '0',
+      '0', 'SEQEND', '8', '0'
+    )
+  );
+
+  const [attrib] = modelEntities(text).filter((e): e is TextEntity => e.type === 'TEXT');
+  assert.equal(attrib.text, 'LABEL');
+  assert.deepEqual(attrib.position, { x: 5, y: 7 });
+  assert.equal(attrib.height, 2.5);
+  assert.equal(attrib.layer, 'TEST');
+});
+
 // ── OCS / extrusion ───────────────────────────────────────────────────────
 
 test('a mirrored ARC (extrusion 0,0,-1) is drawn on the mirrored side', () => {

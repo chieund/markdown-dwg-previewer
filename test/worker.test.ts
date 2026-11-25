@@ -83,3 +83,33 @@ test('a drawing waiting on its converter is not timed out by the one stuck after
     await worker.dispose();
   }
 });
+
+test('an idle worker is released, and the next drawing starts a fresh one (issue #4)', async () => {
+  const logs: string[] = [];
+  const worker = new DrawingWorker(WORKER, (msg) => logs.push(msg), { idleMs: 50 });
+  try {
+    await worker.run(dxfBytes(), 'a.dxf', '', () => {});
+    assert.equal(worker.running, true);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(worker.running, false);
+    assert.ok(logs.some((m) => /idle/.test(m)), 'the release is logged');
+    const parsed = await worker.run(dxfBytes(), 'b.dxf', '', () => {});
+    assert.equal(parsed.pages[0].entities.length, 1);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test('a drawing opened before the idle delay ends keeps the worker it would have lost', async () => {
+  const worker = new DrawingWorker(WORKER, () => {}, { idleMs: 150 });
+  try {
+    await worker.run(dxfBytes(), 'a.dxf', '', () => {});
+    await new Promise((r) => setTimeout(r, 100));
+    const second = worker.run(dxfBytes(), 'b.dxf', '', () => {});
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(worker.running, true, 'the pending job cancelled the release');
+    await second;
+  } finally {
+    await worker.dispose();
+  }
+});

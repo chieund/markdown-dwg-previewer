@@ -16,6 +16,15 @@ const WORKER_HEAP_MB = 3072;
  */
 const JOB_TIMEOUT_MS = 300_000;
 
+/**
+ * How long the worker may sit with no job before it is shut down. Its WASM heap
+ * (LibreDWG, ODA's output) stays allocated for as long as the thread lives, so an
+ * idle worker would hold that memory until VS Code closes. Restarting costs one
+ * WASM load, under a second, so this only needs to cover opening several drawings
+ * in a row.
+ */
+const IDLE_MS = 120_000;
+
 interface Job {
   request: WorkerRequest;
   resolve: (parsed: ParsedDxf) => void;
@@ -28,6 +37,8 @@ interface Job {
 export interface DrawingWorkerOptions {
   /** Overrides JOB_TIMEOUT_MS. */
   timeoutMs?: number;
+  /** Overrides IDLE_MS. */
+  idleMs?: number;
 }
 
 /**
@@ -35,13 +46,16 @@ export interface DrawingWorkerOptions {
  * load once. If the worker dies — out of memory, a crash in WASM — its jobs
  * fail with a readable message and the next job starts a fresh worker. A job
  * that runs too long fails alone: the worker is replaced and the jobs queued
- * behind it are sent to the new one.
+ * behind it are sent to the new one. A worker left idle for IDLE_MS is shut
+ * down to give its memory back; the next job starts a new one.
  */
 export class DrawingWorker {
   private worker: Worker | null = null;
   private readonly jobs = new Map<number, Job>();
   private nextId = 1;
   private readonly timeoutMs: number;
+  private readonly idleMs: number;
+  private idleTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private readonly scriptPath: string,
@@ -49,6 +63,12 @@ export class DrawingWorker {
     options: DrawingWorkerOptions = {}
   ) {
     this.timeoutMs = options.timeoutMs ?? JOB_TIMEOUT_MS;
+    this.idleMs = options.idleMs ?? IDLE_MS;
+  }
+
+  /** Whether a worker thread is alive (for tests and diagnostics). */
+  get running(): boolean {
+    return this.worker !== null;
   }
 
   run(bytes: Uint8Array, filePath: string, converterPath: string, progress: (stage: Stage) => void): Promise<ParsedDxf> {
@@ -61,6 +81,7 @@ export class DrawingWorker {
   }
 
   async dispose(): Promise<void> {
+    this.cancelIdle();
     const worker = this.worker;
     this.worker = null;
     this.failAll(new Error('The drawing worker was shut down.'));
@@ -68,6 +89,7 @@ export class DrawingWorker {
   }
 
   private send(request: WorkerRequest): void {
+    this.cancelIdle();
     const worker = this.ensureWorker();
     // Keep the process alive while a job is out; an idle worker must not.
     worker.ref();
@@ -154,7 +176,30 @@ export class DrawingWorker {
   private finish(id: number, job: Job): void {
     if (job.timer) clearTimeout(job.timer);
     this.jobs.delete(id);
-    if (this.jobs.size === 0) this.worker?.unref();
+    if (this.jobs.size === 0 && this.worker) {
+      this.worker.unref();
+      this.scheduleIdle();
+    }
+  }
+
+  private scheduleIdle(): void {
+    this.cancelIdle();
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = undefined;
+      // A job sent since then cancelled this timer; check anyway, a busy worker is never released.
+      if (this.jobs.size > 0 || !this.worker) return;
+      const idle = this.worker;
+      // Cleared first, so the exit it reports is ignored and the next job starts a new worker.
+      this.worker = null;
+      this.log(`Drawing worker idle for ${this.idleMs} ms; shutting it down to free its memory`);
+      void idle.terminate();
+    }, this.idleMs);
+    this.idleTimer.unref();
+  }
+
+  private cancelIdle(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = undefined;
   }
 
   private failAll(err: Error): void {
