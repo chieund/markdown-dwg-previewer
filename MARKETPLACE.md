@@ -56,6 +56,10 @@ next to the code that parses them.
 - **Quantities** — count every block (`Door-900` × 14) and measure linework and area per layer,
   in the units the drawing declares (or the one you pick, when it declares none); shift-click a
   few objects to add up their length and area, and copy the table straight into a spreadsheet
+- **Measure** — click two points for the distance and its ΔX / ΔY, or more points for the length
+  and the area they enclose; clicks lock onto corners, so the number is exact
+- **Readable on a dark canvas** — colours drawn for white paper (dark red, navy, black) are
+  lightened just enough to stand out
 - **Compare drawings** — *Compare with HEAD* (Git), *Compare with File…* or two selected files:
   added objects in green, removed in red, changed in yellow over their old shape, with a list of
   every change to step through (F7)
@@ -107,7 +111,7 @@ as wireframe.
 
 **A drawing looks incomplete — why?**
 The toolbar shows a banner naming every entity type in the drawing that this viewer can't draw
-yet — LEADER, MULTILEADER, TABLE, WIPEOUT and 3D solids are the common ones. Objects hidden in the file
+yet — WIPEOUT and 3D solids are the common ones. Objects hidden in the file
 itself — invisible attributes, hidden dynamic-block states — are left out on purpose, as in
 AutoCAD. Please report drawings that look wrong.
 
@@ -122,6 +126,7 @@ AutoCAD. Please report drawings that look wrong.
 | **Text** | TEXT · MTEXT · ATTRIB — with fonts, alignment and rotation |
 | **Blocks** | INSERT — nested, rotated, mirrored, scaled, and grid arrays (mirrored arcs, circles, polylines, text and hatches too) |
 | **Dimensions** | DIMENSION — drawn as AutoCAD laid it out: dimension and extension lines, arrowheads, text |
+| **Notes** | TABLE (schedules, cell text included) · MULTILEADER callouts · LEADER with arrowheads |
 | **Other** | POINT · 3DFACE · viewports on paper-space sheets |
 
 Layers keep their colors and linetypes from the original drawing; line weights set directly
@@ -133,9 +138,12 @@ on an object are kept too. Layers switched off in a DXF start hidden.
 
 Let an AI agent read the drawing you have open, so you can ask "how many doors are on this plan?" or "what size is the largest room?" and get an answer from the drawing itself instead of counting by eye.
 
+Press **Ask AI** on the toolbar to connect an agent.
+
 **What an agent can do**
 
 - Read the drawing: overview (sheets, layers, block counts), text search, and dimensions — counts, sizes and notes
+- Count and measure: how many of each block, length and area per layer, and distances or room areas measured from the geometry when no dimension is drawn
 - Highlight and zoom in the preview, so you can see what it is talking about
 - Take a snapshot of the view (or a region) to look at it
 
@@ -147,6 +155,7 @@ Vietnamese text in the old TCVN3 fonts (`.Vn*`) now displays correctly in the pr
 |-------|-----|
 | Claude Code | Run **DWG: Connect AI Agents…** (or accept the prompt the first time you open a drawing; it only appears when Claude Code is installed). This runs `claude mcp add` for you and registers the server as `dwg-previewer`. |
 | GitHub Copilot | Automatic on VS Code 1.101 or newer. The tools appear in Copilot Chat agent mode; the first use in a session may take a moment while the server starts. |
+| Cursor, Kiro | Run **DWG: Connect AI Agents…** and pick **Connect Cursor** or **Connect Kiro**. This adds `dwg-previewer` to `~/.cursor/mcp.json` or `~/.kiro/settings/mcp.json`, keeping your other servers; a file with comments is left alone. Kiro picks it up at once; Cursor may need its MCP servers reloaded. |
 | Other agents | Run **DWG: Connect AI Agents…** and copy the URL and the `Authorization` header. Add them to the agent's MCP settings; the config format differs per agent, see its MCP documentation. |
 
 **Which files an agent can read.** Drawings in your workspace folders and drawings open in a preview are free. Any other `.dwg` / `.dxf` needs your click on a modal **Allow** prompt first.

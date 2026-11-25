@@ -8,7 +8,7 @@
  */
 import { DECLARABLE_UNITS, OUTPUT_UNITS, Unit, formatCount } from './units';
 import { toCsv, toTsv } from './table';
-import { EMPTY_TAKEOFF, Takeoff } from './takeoff';
+import { EMPTY_TAKEOFF, Takeoff } from '../shared/takeoff';
 import { TakeoffTab, takeoffTable } from './takeoffTable';
 
 export interface TakeoffPanelOptions {

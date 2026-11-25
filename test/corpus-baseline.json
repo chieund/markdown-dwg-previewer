@@ -4,30 +4,30 @@
     "sizeKB": 185,
     "ok": true,
     "format": "dwg",
-    "convertMs": 221,
+    "convertMs": 186,
     "dxfKB": 932,
-    "parseMs": 174,
+    "parseMs": 240,
     "pages": 2,
-    "entities": 1786,
-    "viewportEntities": 1695,
-    "layers": 42,
+    "entities": 1927,
+    "viewportEntities": 1784,
+    "layers": 43,
     "extents": [
-      "4.286 13.71 1332 580.4",
+      "-53.71 13.71 1352 581.8",
       "-0.2499 -0.7499 35.75 23.25"
     ],
     "anonymousInserts": 0,
-    "skipped": [
-      "MULTILEADER"
-    ]
+    "texts": 256,
+    "textHash": "e2099f580b0e12fc",
+    "skipped": []
   },
   {
     "file": "architectural_example-imperial.dwg",
     "sizeKB": 145,
     "ok": true,
     "format": "dwg",
-    "convertMs": 53,
+    "convertMs": 54,
     "dxfKB": 690,
-    "parseMs": 31,
+    "parseMs": 34,
     "pages": 1,
     "entities": 76,
     "viewportEntities": 0,
@@ -36,6 +36,8 @@
       "0 0 775.1 812.5"
     ],
     "anonymousInserts": 0,
+    "texts": 28,
+    "textHash": "5b2a40183930574c",
     "skipped": []
   },
   {
@@ -43,11 +45,11 @@
     "sizeKB": 222,
     "ok": true,
     "format": "dwg",
-    "convertMs": 107,
+    "convertMs": 85,
     "dxfKB": 1479,
-    "parseMs": 125,
+    "parseMs": 155,
     "pages": 2,
-    "entities": 1232,
+    "entities": 1722,
     "viewportEntities": 1082,
     "layers": 15,
     "extents": [
@@ -55,39 +57,39 @@
       "0 -4.164e-15 35.8 23"
     ],
     "anonymousInserts": 0,
-    "skipped": [
-      "ACAD_TABLE"
-    ]
+    "texts": 775,
+    "textHash": "c45f36e8367532e3",
+    "skipped": []
   },
   {
     "file": "blocks_and_tables_-_metric.dwg",
     "sizeKB": 253,
     "ok": true,
     "format": "dwg",
-    "convertMs": 87,
+    "convertMs": 86,
     "dxfKB": 1713,
-    "parseMs": 129,
+    "parseMs": 168,
     "pages": 2,
-    "entities": 1523,
+    "entities": 2013,
     "viewportEntities": 1376,
-    "layers": 15,
+    "layers": 16,
     "extents": [
       "121.8 162.4 149.7 183.5",
       "0 -4.164e-15 1148 552"
     ],
     "anonymousInserts": 0,
-    "skipped": [
-      "ACAD_TABLE"
-    ]
+    "texts": 759,
+    "textHash": "b5a7191334836475",
+    "skipped": []
   },
   {
     "file": "civil_example-imperial.dwg",
     "sizeKB": 166,
     "ok": true,
     "format": "dwg",
-    "convertMs": 36,
-    "dxfKB": 729,
-    "parseMs": 22,
+    "convertMs": 37,
+    "dxfKB": 728,
+    "parseMs": 25,
     "pages": 1,
     "entities": 33,
     "viewportEntities": 0,
@@ -96,6 +98,8 @@
       "0 -3.71 592.5 651.9"
     ],
     "anonymousInserts": 0,
+    "texts": 26,
+    "textHash": "39c0d6495155c7f6",
     "skipped": []
   },
   {
@@ -103,9 +107,9 @@
     "sizeKB": 1745,
     "ok": true,
     "format": "dwg",
-    "convertMs": 467,
-    "dxfKB": 9179,
-    "parseMs": 1853,
+    "convertMs": 490,
+    "dxfKB": 9178,
+    "parseMs": 1932,
     "pages": 3,
     "entities": 36431,
     "viewportEntities": 33952,
@@ -116,6 +120,8 @@
       "0.06151 0.1597 9.365 7.771"
     ],
     "anonymousInserts": 0,
+    "texts": 120,
+    "textHash": "ae22793b1bc71521",
     "skipped": []
   },
   {
@@ -123,9 +129,9 @@
     "sizeKB": 57,
     "ok": true,
     "format": "dwg",
-    "convertMs": 14,
+    "convertMs": 9,
     "dxfKB": 179,
-    "parseMs": 8,
+    "parseMs": 10,
     "pages": 1,
     "entities": 95,
     "viewportEntities": 0,
@@ -134,6 +140,8 @@
       "0 0 8 10.5"
     ],
     "anonymousInserts": 0,
+    "texts": 118,
+    "textHash": "edc44dcd371e942d",
     "skipped": []
   },
   {
@@ -141,9 +149,9 @@
     "sizeKB": 139,
     "ok": true,
     "format": "dwg",
-    "convertMs": 36,
+    "convertMs": 30,
     "dxfKB": 618,
-    "parseMs": 14,
+    "parseMs": 15,
     "pages": 1,
     "entities": 88,
     "viewportEntities": 0,
@@ -152,6 +160,8 @@
       "0 0 93.11 67.57"
     ],
     "anonymousInserts": 0,
+    "texts": 34,
+    "textHash": "8442836b33876817",
     "skipped": []
   },
   {
@@ -159,7 +169,7 @@
     "sizeKB": 84,
     "ok": true,
     "format": "dwg",
-    "convertMs": 29,
+    "convertMs": 25,
     "dxfKB": 498,
     "parseMs": 25,
     "pages": 7,
@@ -176,6 +186,8 @@
       "3.417 6.644 7.017 7.144"
     ],
     "anonymousInserts": 0,
+    "texts": 128,
+    "textHash": "229cc0456129cd0a",
     "skipped": []
   },
   {
@@ -183,9 +195,9 @@
     "sizeKB": 428,
     "ok": true,
     "format": "dwg",
-    "convertMs": 138,
+    "convertMs": 139,
     "dxfKB": 2785,
-    "parseMs": 196,
+    "parseMs": 183,
     "pages": 1,
     "entities": 5199,
     "viewportEntities": 0,
@@ -194,6 +206,8 @@
       "1.716 1.067 12.77 13.13"
     ],
     "anonymousInserts": 0,
+    "texts": 647,
+    "textHash": "373ea00a54f8f07a",
     "skipped": [
       "OLE2FRAME"
     ]
@@ -203,9 +217,9 @@
     "sizeKB": 124,
     "ok": true,
     "format": "dwg",
-    "convertMs": 30,
+    "convertMs": 27,
     "dxfKB": 529,
-    "parseMs": 29,
+    "parseMs": 21,
     "pages": 1,
     "entities": 29,
     "viewportEntities": 0,
@@ -214,6 +228,8 @@
       "0 0 36 24"
     ],
     "anonymousInserts": 0,
+    "texts": 10,
+    "textHash": "0258af59b3bc42fe",
     "skipped": []
   },
   {
@@ -221,9 +237,9 @@
     "sizeKB": 125,
     "ok": true,
     "format": "dwg",
-    "convertMs": 28,
+    "convertMs": 25,
     "dxfKB": 540,
-    "parseMs": 17,
+    "parseMs": 19,
     "pages": 1,
     "entities": 29,
     "viewportEntities": 0,
@@ -232,6 +248,8 @@
       "0 0 841 594"
     ],
     "anonymousInserts": 0,
+    "texts": 10,
+    "textHash": "0258af59b3bc42fe",
     "skipped": []
   },
   {
@@ -239,9 +257,9 @@
     "sizeKB": 69,
     "ok": true,
     "format": "dwg",
-    "convertMs": 13,
+    "convertMs": 12,
     "dxfKB": 233,
-    "parseMs": 6,
+    "parseMs": 9,
     "pages": 1,
     "entities": 53,
     "viewportEntities": 0,
@@ -250,6 +268,8 @@
       "0.5 -2.534 31.12 27.77"
     ],
     "anonymousInserts": 0,
+    "texts": 24,
+    "textHash": "238f3dc8e7219489",
     "skipped": []
   },
   {
@@ -257,9 +277,9 @@
     "sizeKB": 716,
     "ok": true,
     "format": "dwg",
-    "convertMs": 126,
-    "dxfKB": 1973,
-    "parseMs": 26,
+    "convertMs": 119,
+    "dxfKB": 1983,
+    "parseMs": 40,
     "pages": 1,
     "entities": 0,
     "viewportEntities": 0,
@@ -268,6 +288,8 @@
       "empty"
     ],
     "anonymousInserts": 0,
+    "texts": 0,
+    "textHash": "e3b0c44298fc1c14",
     "skipped": [
       "3DSOLID",
       "PLANESURFACE"
@@ -278,9 +300,9 @@
     "sizeKB": 1383,
     "ok": true,
     "format": "dwg",
-    "convertMs": 293,
-    "dxfKB": 3660,
-    "parseMs": 192,
+    "convertMs": 268,
+    "dxfKB": 3709,
+    "parseMs": 98,
     "pages": 1,
     "entities": 6,
     "viewportEntities": 0,
@@ -289,6 +311,8 @@
       "-9.003e-13 3676 477.5 3940"
     ],
     "anonymousInserts": 0,
+    "texts": 0,
+    "textHash": "e3b0c44298fc1c14",
     "skipped": [
       "3DSOLID",
       "LIGHT"
@@ -299,8 +323,8 @@
     "sizeKB": 951,
     "ok": true,
     "format": "dwg",
-    "convertMs": 183,
-    "dxfKB": 2544,
+    "convertMs": 166,
+    "dxfKB": 2585,
     "parseMs": 48,
     "pages": 1,
     "entities": 8,
@@ -310,6 +334,8 @@
       "-34.32 -125.1 337.7 94.06"
     ],
     "anonymousInserts": 0,
+    "texts": 0,
+    "textHash": "e3b0c44298fc1c14",
     "skipped": [
       "3DSOLID",
       "LIGHT",
@@ -321,9 +347,9 @@
     "sizeKB": 540,
     "ok": true,
     "format": "dwg",
-    "convertMs": 135,
-    "dxfKB": 1682,
-    "parseMs": 48,
+    "convertMs": 104,
+    "dxfKB": 1726,
+    "parseMs": 34,
     "pages": 1,
     "entities": 0,
     "viewportEntities": 0,
@@ -332,6 +358,8 @@
       "empty"
     ],
     "anonymousInserts": 0,
+    "texts": 0,
+    "textHash": "e3b0c44298fc1c14",
     "skipped": [
       "3DSOLID"
     ]
@@ -341,12 +369,12 @@
     "sizeKB": 4038,
     "ok": true,
     "format": "dxf-text",
-    "convertMs": 12,
+    "convertMs": 10,
     "dxfKB": 4038,
-    "parseMs": 687,
+    "parseMs": 560,
     "pages": 3,
-    "entities": 10489,
-    "viewportEntities": 8277,
+    "entities": 10521,
+    "viewportEntities": 8289,
     "layers": 13,
     "extents": [
       "-2060 -589.7 2145 991.7",
@@ -354,18 +382,18 @@
       "0 7.3e-15 35.6 22.66"
     ],
     "anonymousInserts": 0,
-    "skipped": [
-      "LEADER"
-    ]
+    "texts": 2840,
+    "textHash": "8f0005764ff6a59e",
+    "skipped": []
   },
   {
     "file": "Bracket.dwg",
     "sizeKB": 68,
     "ok": true,
     "format": "dwg",
-    "convertMs": 80,
+    "convertMs": 12,
     "dxfKB": 215,
-    "parseMs": 48,
+    "parseMs": 20,
     "pages": 1,
     "entities": 300,
     "viewportEntities": 0,
@@ -374,6 +402,8 @@
       "0.5 0.25 21.5 16.75"
     ],
     "anonymousInserts": 0,
+    "texts": 80,
+    "textHash": "a14580b35655e719",
     "skipped": []
   },
   {
@@ -381,9 +411,9 @@
     "sizeKB": 2861,
     "ok": true,
     "format": "dwg",
-    "convertMs": 643,
-    "dxfKB": 9716,
-    "parseMs": 106848,
+    "convertMs": 514,
+    "dxfKB": 9715,
+    "parseMs": 1868,
     "pages": 1,
     "entities": 42118,
     "viewportEntities": 0,
@@ -392,6 +422,8 @@
       "-3424 -2737 93480 52380"
     ],
     "anonymousInserts": 0,
+    "texts": 673,
+    "textHash": "456789ff1e8ee8fb",
     "skipped": [
       "3DSOLID",
       "WIPEOUT"
@@ -402,9 +434,9 @@
     "sizeKB": 1731,
     "ok": true,
     "format": "dwg",
-    "convertMs": 5256,
-    "dxfKB": 14269,
-    "parseMs": 57667,
+    "convertMs": 921,
+    "dxfKB": 14297,
+    "parseMs": 2933,
     "pages": 1,
     "entities": 244682,
     "viewportEntities": 0,
@@ -413,6 +445,8 @@
       "0 0 235300 139700"
     ],
     "anonymousInserts": 0,
+    "texts": 6870,
+    "textHash": "8b520c103d8ddfbb",
     "skipped": []
   },
   {
@@ -420,9 +454,9 @@
     "sizeKB": 488,
     "ok": true,
     "format": "dxf-text",
-    "convertMs": 418,
+    "convertMs": 0,
     "dxfKB": 488,
-    "parseMs": 5326,
+    "parseMs": 53,
     "pages": 1,
     "entities": 155,
     "viewportEntities": 0,
@@ -431,6 +465,8 @@
       "-191700 -227300 274500 216600"
     ],
     "anonymousInserts": 0,
+    "texts": 64,
+    "textHash": "64ccc6aab74c2c9a",
     "skipped": []
   },
   {
@@ -438,9 +474,9 @@
     "sizeKB": 1444,
     "ok": true,
     "format": "dxf-text",
-    "convertMs": 311,
+    "convertMs": 0,
     "dxfKB": 1444,
-    "parseMs": 1799,
+    "parseMs": 140,
     "pages": 1,
     "entities": 693,
     "viewportEntities": 0,
@@ -449,6 +485,8 @@
       "34.82 43.88 303.4 239.9"
     ],
     "anonymousInserts": 0,
+    "texts": 0,
+    "textHash": "e3b0c44298fc1c14",
     "skipped": []
   }
 ]

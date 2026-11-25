@@ -36,7 +36,7 @@ interface Question {
   note?: string;
 }
 
-const ALLOWED = ['dwg_overview', 'dwg_find_text', 'dwg_dimensions'].map((t) => `mcp__${SERVER_NAME}__${t}`).join(',');
+const ALLOWED = ['dwg_overview', 'dwg_find_text', 'dwg_dimensions', 'dwg_quantities', 'dwg_measure'].map((t) => `mcp__${SERVER_NAME}__${t}`).join(',');
 // Belt and braces: --tools "" removes every built-in tool; the disallow list names the usual ones anyway.
 const DISALLOWED = 'Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,Agent';
 

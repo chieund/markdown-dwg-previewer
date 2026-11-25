@@ -67,7 +67,7 @@ async function rpc(url: string, method: string, params: unknown, headers: Record
 
 const INIT = { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } };
 
-test('initialize and tools/list return the five tools', async () => {
+test('initialize and tools/list return every tool', async () => {
   const s = await start(await freePort());
   try {
     assert.equal(s.serving, true);
@@ -75,7 +75,7 @@ test('initialize and tools/list return the five tools', async () => {
     assert.equal(init.status, 200);
     const list = await rpc(s.url, 'tools/list', {});
     const names = list.json.result.tools.map((t: { name: string }) => t.name);
-    assert.equal(names.length, 5);
+    assert.equal(names.length, 7);
     assert.ok(names.includes('dwg_overview'));
   } finally {
     await s.close();
@@ -129,7 +129,7 @@ test('standby: B waits while A serves and takes over when A closes', async () =>
     assert.equal(b.serving, true);
     assert.deepEqual(flips, [true]);
     const list = await rpc(b.url, 'tools/list', {});
-    assert.equal(list.json.result.tools.length, 5);
+    assert.equal(list.json.result.tools.length, 7);
   } finally {
     await a.close();
     await b.close();

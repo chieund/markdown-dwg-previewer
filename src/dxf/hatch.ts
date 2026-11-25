@@ -65,9 +65,9 @@ export function scanHatches(text: string): RawHatch[] {
   return hatches;
 }
 
-type Pair = [number, string];
+export type Pair = [number, string];
 
-function toPairs(text: string): Pair[] {
+export function toPairs(text: string): Pair[] {
   const lines = text.split(/\r\n|\r|\n/);
   const pairs: Pair[] = [];
   for (let i = 0; i + 1 < lines.length; i += 2) {
