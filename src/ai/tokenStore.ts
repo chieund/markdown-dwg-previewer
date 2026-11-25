@@ -15,12 +15,35 @@ const RETRY_MS = 50;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function isStale(lock: string): Promise<boolean> {
+async function readLock(lock: string): Promise<{ id: string; mtimeMs: number } | undefined> {
   try {
-    const stat = await fs.stat(lock);
-    return Date.now() - stat.mtimeMs > LOCK_STALE_MS;
+    const [id, stat] = await Promise.all([fs.readFile(lock, 'utf-8'), fs.stat(lock)]);
+    return { id, mtimeMs: stat.mtimeMs };
   } catch {
-    return false;
+    return undefined;
+  }
+}
+
+/**
+ * Removes a lock left by a crashed window. Two windows may judge the same
+ * lock stale; the first one breaks it and takes a new one, so the second must
+ * not delete that. The lock is moved aside atomically and checked: if it is
+ * not the one judged stale, it is put back.
+ */
+async function breakStaleLock(lock: string, staleId: string): Promise<void> {
+  const aside = `${lock}.${process.pid}.${randomBytes(4).toString('hex')}`;
+  try {
+    await fs.rename(lock, aside);
+  } catch {
+    return; // Someone else already moved it
+  }
+  try {
+    if ((await fs.readFile(aside, 'utf-8')) !== staleId) {
+      // A live lock: restore it unless a new one already took its place
+      await fs.link(aside, lock).catch(() => {});
+    }
+  } finally {
+    await fs.rm(aside, { force: true });
   }
 }
 
@@ -38,18 +61,22 @@ export async function getOrCreateToken(secrets: SecretStore, dir: string, key: s
   const lock = path.join(dir, LOCK_NAME);
   const deadline = Date.now() + LOCK_WAIT_MS;
 
+  const id = randomBytes(16).toString('hex');
   for (;;) {
     let handle: fs.FileHandle | undefined;
     try {
       handle = await fs.open(lock, 'wx', 0o600);
+      await handle.writeFile(id);
     } catch (err) {
+      await handle?.close();
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       // Another window is creating it. It may already have stored the token;
       // read again before waiting, and recover from a crashed window's lock.
       const stored = await secrets.get(key);
       if (stored) return stored;
-      if (await isStale(lock)) {
-        await fs.rm(lock, { force: true });
+      const held = await readLock(lock);
+      if (held && Date.now() - held.mtimeMs > LOCK_STALE_MS) {
+        await breakStaleLock(lock, held.id);
         continue;
       }
       if (Date.now() >= deadline) throw new Error('Timed out waiting for the AI access token lock');
@@ -69,7 +96,8 @@ export async function getOrCreateToken(secrets: SecretStore, dir: string, key: s
       return after;
     } finally {
       await handle.close();
-      await fs.rm(lock, { force: true });
+      // Only our own lock: a window that judged it stale may have replaced it
+      if ((await readLock(lock))?.id === id) await fs.rm(lock, { force: true });
     }
   }
 }

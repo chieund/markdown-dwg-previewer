@@ -35,9 +35,10 @@ import AUTO_CAD_COLOR_INDEX from 'dxf-parser/dist/AutoCadColorIndex';
 import { expandBulges } from './bulge';
 import { scanBlockNames } from './blockNames';
 import { HEADER_SNIFF_BYTES, legacyEncodingOf } from '../dwg/encoding';
-import { LegacyFont, decodeTcvn3, legacyFontOf } from './vietnamese';
+import { LegacyFont, decodeTcvn3, isUnicodeVietnamese, legacyFontOf } from './vietnamese';
 import { EntityExtras, Vector3D, scanEntityExtras } from './extras';
 import { scanHatches } from './hatch';
+import { arrowPolygon, scanAnnotations, type LeaderArrow, type LeaderText } from './annotations';
 import {
   Measure,
   arcLength,
@@ -85,6 +86,7 @@ const READ_TYPES = new Set([
   '3DFACE', 'ARC', 'ATTDEF', 'CIRCLE', 'DIMENSION', 'ELLIPSE', 'INSERT', 'LINE', 'LWPOLYLINE',
   'MTEXT', 'POINT', 'POLYLINE', 'SOLID', 'SPLINE', 'TEXT',
   'HATCH', 'ATTRIB', 'VIEWPORT', 'VERTEX', 'SEQEND',
+  'ACAD_TABLE', 'MULTILEADER', 'LEADER',
 ]);
 
 /** Blocks can reference other blocks; this bounds the recursion in case a file contains a cycle. */
@@ -135,8 +137,8 @@ interface ParseContext {
   textStyles: Record<string, string>;
   /** Text style name (upper case) → the font file it names, for telling TCVN3 text apart. */
   fontFiles: Record<string, string>;
-  /** The single-byte code page the file's text was read with; TCVN3 bytes are recovered through it. Null for Unicode (R2007+) files. */
-  legacyEncoding: string | null;
+  /** The single-byte code page the file's text was read with; TCVN3 bytes are recovered through it. */
+  legacyEncoding: string;
   /** Extrusion, text style and file position per entity handle. */
   extras: EntityExtras;
   /** Anonymous block name → the block it is a representation of. */
@@ -570,12 +572,13 @@ export function parseDxf(text: string, options: ParseOptions = {}): ParsedDxf {
   const dxf = parseWithRecovery(text);
   const extras = scanEntityExtras(text);
   injectHatches(text, dxf, extras);
+  const unreadableAnnotations = injectAnnotations(text, dxf, extras);
 
   const styles = scanTextStyles(text);
   const context: ParseContext = {
     layers: dxf?.tables?.layer?.layers ?? {},
     blocks: dxf?.blocks ?? {},
-    skippedEntityTypes: new Set<string>(),
+    skippedEntityTypes: new Set<string>(unreadableAnnotations),
     lineTypes: extractLineTypes(dxf),
     layerLineTypes: scanLayerLineTypes(text),
     layerHandleMap: scanLayerHandles(text),
@@ -764,7 +767,8 @@ type ObjectContext = Pick<ParseContext, 'blockNames' | 'blocks' | 'extras' | 'te
 
 function describeObject(raw: IEntity, context: ObjectContext): ObjectInfo {
   const { blockNames } = context;
-  const info: ObjectInfo = { type: raw.type, layer: raw.layer ?? '0', page: 0 };
+  const annotation = (raw as { annotation?: string }).annotation;
+  const info: ObjectInfo = { type: annotation ?? raw.type, layer: raw.layer ?? '0', page: 0 };
   // dxf-parser numbers entities that have no handle (R12) itself; only a
   // string came from the file, and only a real handle may pair objects up.
   if (typeof raw.handle === 'string') info.handle = raw.handle;
@@ -772,9 +776,12 @@ function describeObject(raw: IEntity, context: ObjectContext): ObjectInfo {
   switch (raw.type) {
     case 'INSERT': {
       const e = raw as IInsertEntity;
-      // A dynamic block is inserted through an anonymous record; list it under
-      // the block it stands for, which is the name the drawing is read by.
-      info.block = blockNames[e.name] ?? e.name;
+      // A table is an INSERT of its anonymous block, but is not a block the drawing counts
+      if (!annotation) {
+        // A dynamic block is inserted through an anonymous record; list it under
+        // the block it stands for, which is the name the drawing is read by.
+        info.block = blockNames[e.name] ?? e.name;
+      }
       if (e.position) info.position = { x: e.position.x, y: e.position.y };
       info.rotation = e.rotation ?? 0;
       info.scale = { x: e.xScale ?? 1, y: e.yScale ?? 1 };
@@ -795,6 +802,14 @@ function describeObject(raw: IEntity, context: ObjectContext): ObjectInfo {
     case 'DIMENSION': {
       const e = raw as IDimensionEntity;
       info.text = dimensionLabel(e, context);
+      break;
+    }
+    case 'MULTILEADER': {
+      const note = (raw as unknown as { text?: LeaderText }).text;
+      if (note) {
+        info.text = cleanMtext(note.value, null, context.legacyEncoding);
+        info.position = { x: note.position.x, y: note.position.y };
+      }
       break;
     }
   }
@@ -977,6 +992,64 @@ function injectHatches(
   }
 
   for (const [list, hatches] of pending) mergeInFileOrder(list, hatches, extras);
+}
+
+/**
+ * Feeds tables and leaders back into the parsed drawing, like hatches: they are
+ * scanned from the raw text and spliced in at their place in the draw order.
+ * Returns the types that could not be read (a table whose block is missing).
+ */
+function injectAnnotations(
+  text: string,
+  dxf: ReturnType<DxfParser['parseSync']>,
+  extras: EntityExtras
+): Set<string> {
+  const { found, unreadable } = scanAnnotations(text);
+  if (!dxf) return unreadable;
+
+  const pending = new Map<IEntity[], IEntity[]>();
+  for (const a of found) {
+    const common = {
+      handle: a.handle,
+      layer: a.layer,
+      colorIndex: a.colorIndex,
+      color: a.colorIndex !== undefined ? aciToTrueColor(a.colorIndex) : undefined,
+      inPaperSpace: a.inPaperSpace,
+      ...(a.invisible ? { visible: false } : {}),
+    };
+    let pseudo: IEntity;
+    if (a.kind === 'table') {
+      if (!dxf.blocks?.[a.block]) {
+        unreadable.add('ACAD_TABLE');
+        continue;
+      }
+      pseudo = {
+        ...common,
+        type: 'INSERT',
+        annotation: 'ACAD_TABLE',
+        name: a.block,
+        position: { x: a.position.x, y: a.position.y, z: 0 },
+        xScale: 1,
+        yScale: 1,
+        rotation: 0,
+      } as unknown as IEntity;
+    } else {
+      pseudo = {
+        ...common,
+        type: a.kind === 'leader' ? 'LEADER' : 'MULTILEADER',
+        strokes: a.strokes,
+        arrows: a.arrows,
+        text: a.text,
+      } as unknown as IEntity;
+    }
+    const list = a.blockName ? dxf.blocks?.[a.blockName]?.entities : dxf.entities;
+    if (!list) continue;
+    if (!pending.has(list)) pending.set(list, []);
+    pending.get(list)!.push(pseudo);
+  }
+
+  for (const [list, items] of pending) mergeInFileOrder(list, items, extras);
+  return unreadable;
 }
 
 /**
@@ -1556,6 +1629,26 @@ function mapEntity(
       ];
     }
 
+    case 'LEADER':
+    case 'MULTILEADER': {
+      // Annotation lines are not linework: they are drawn but never measured
+      const e = raw as unknown as { strokes: Point2D[][]; arrows: LeaderArrow[]; text?: LeaderText };
+      const drawn: DxfEntity[] = [];
+      for (const stroke of e.strokes) {
+        const points = finitePoints(stroke).map((p) => applyToPoint(m, p));
+        if (points.length >= 2) drawn.push({ type: 'POLYLINE', layer, color, points, closed: false });
+      }
+      for (const arrow of e.arrows) {
+        const points = arrowPolygon(arrow).map((p) => applyToPoint(m, p));
+        drawn.push({ type: 'POLYLINE', layer, color, points, closed: true, filled: true });
+      }
+      if (e.text) {
+        const note = cleanMtext(e.text.value, null, context.legacyEncoding);
+        if (note) drawn.push(buildText(layer, color, e.text.position, note, e.text.height, e.text.rotation, m, 'left', 'top'));
+      }
+      return drawn;
+    }
+
     default:
       if (!INTENTIONALLY_NOT_DRAWN.has(raw.type)) context.skippedEntityTypes.add(raw.type);
       return [];
@@ -1871,7 +1964,7 @@ function textLegacyFont(raw: IEntity, context: Pick<ParseContext, 'extras' | 'te
 
 /** Text drawn in a TCVN3 font, read as the Vietnamese it stands for. */
 function readLegacy(text: string, font: LegacyFont, context: Pick<ParseContext, 'legacyEncoding'>): string {
-  return font && context.legacyEncoding ? decodeTcvn3(text, font === 'tcvn3-caps', context.legacyEncoding) : text;
+  return font ? decodeTcvn3(text, font === 'tcvn3-caps', context.legacyEncoding) : text;
 }
 
 /**
@@ -1902,10 +1995,20 @@ function toHexColor(truecolor: number): string {
  * - codes whose argument runs to a semicolon: `\f \H \C \S` …
  * - escapes standing for a character: `\P \N \~ \\ \{ \}` and `\U+XXXX`.
  */
-function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith: string | null = 'latin1'): string {
-  let out = '';
+function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith = 'latin1'): string {
+  // Output pieces, each tagged with the font span it was written in. A span
+  // runs until the font changes, across formatting codes, and is judged as a
+  // whole: text typed as Unicode in it stays as it is, while a TCVN3 span
+  // beside it is still read (see decodeTcvn3).
+  const pieces: { text: string; span: number; plain: boolean }[] = [];
+  const spanFonts: LegacyFont[] = [baseFont];
   // `\f` switches the font until the `{}` scope it sits in ends.
   let font = baseFont;
+  const setFont = (next: LegacyFont) => {
+    if (next !== font) spanFonts.push(next);
+    font = next;
+  };
+  const emit = (text: string, plain = false) => pieces.push({ text, span: spanFonts.length - 1, plain });
   const scopes: LegacyFont[] = [];
   for (let i = 0; i < raw.length; i++) {
     const ch = raw[i];
@@ -1914,11 +2017,11 @@ function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith: strin
       continue;
     }
     if (ch === '}') {
-      if (scopes.length > 0) font = scopes.pop()!;
+      if (scopes.length > 0) setFont(scopes.pop()!);
       continue;
     }
     if (ch !== '\\' || i + 1 >= raw.length) {
-      out += font && decodedWith ? decodeTcvn3(ch, font === 'tcvn3-caps', decodedWith) : ch;
+      emit(ch, true);
       continue;
     }
 
@@ -1928,15 +2031,15 @@ function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith: strin
       case 'P':
       case 'X':
       case 'N':
-        out += '\n';
+        emit('\n');
         break;
       case '~':
-        out += ' ';
+        emit(' ');
         break;
       case '\\':
       case '{':
       case '}':
-        out += code;
+        emit(code);
         break;
       case 'L': case 'l': case 'O': case 'o': case 'K': case 'k':
         break;
@@ -1944,10 +2047,10 @@ function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith: strin
       case 'M': {
         const escape = raw.slice(i - 1).match(/^\\(U\+[0-9A-Fa-f]{4}|M\+[1-5][0-9A-Fa-f]{4})/);
         if (escape) {
-          out += decodeTextValue(escape[0], false);
+          emit(decodeTextValue(escape[0], false));
           i += escape[0].length - 2;
         } else {
-          out += code;
+          emit(code);
         }
         break;
       }
@@ -1955,7 +2058,7 @@ function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith: strin
         // Stacked text: numerator and denominator split by ^, / or #.
         const end = raw.indexOf(';', i + 1);
         const body = raw.slice(i + 1, end < 0 ? raw.length : end);
-        out += body.replace(/\\(.)/g, '$1').split(/[\^/#]/).map((part) => part.trim()).filter(Boolean).join('/');
+        emit(body.replace(/\\(.)/g, '$1').split(/[\^/#]/).map((part) => part.trim()).filter(Boolean).join('/'));
         i = end < 0 ? raw.length : end;
         break;
       }
@@ -1963,13 +2066,26 @@ function cleanMtext(raw: string, baseFont: LegacyFont = null, decodedWith: strin
         // Formatting codes with an argument (\f, \H, \W, \Q, \T, \A, \C, \c, \p …)
         if (/[A-Za-z]/.test(code)) {
           const end = raw.indexOf(';', i + 1);
-          if (code === 'f' || code === 'F') font = legacyFontOf(raw.slice(i + 1, end < 0 ? raw.length : end).split('|')[0]);
+          if (code === 'f' || code === 'F') setFont(legacyFontOf(raw.slice(i + 1, end < 0 ? raw.length : end).split('|')[0]));
           i = end < 0 ? raw.length : end;
         } else {
-          out += code;
+          emit(code);
         }
       }
     }
+  }
+  // A span is judged on its own letters. AutoCAD writes a Unicode letter the
+  // TCVN3 font lacks in a font of its own ("Kh{\\fTimes;ổ} TT"), so the span
+  // around it is still TCVN3 and drawn as such, capitals included.
+  const plainText = spanFonts.map(() => '');
+  for (const piece of pieces) if (piece.plain) plainText[piece.span] += piece.text;
+  const unicode = plainText.map((plain) => isUnicodeVietnamese(plain, decodedWith));
+  let out = '';
+  for (const piece of pieces) {
+    const spanFont = spanFonts[piece.span];
+    out += piece.plain && spanFont && !unicode[piece.span]
+      ? decodeTcvn3(piece.text, spanFont === 'tcvn3-caps', decodedWith)
+      : piece.text;
   }
   return decodePercentCodes(out);
 }

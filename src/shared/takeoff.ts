@@ -6,7 +6,7 @@
  * unit search and the inspector use, so a number here always refers to
  * something the user can click and see.
  */
-import type { ObjectInfo } from '../shared/types';
+import type { ObjectInfo } from './types';
 
 export interface BlockRow {
   name: string;
@@ -51,8 +51,14 @@ export interface Totals {
  * shows, so a layer switched off does not quietly inflate the totals. Objects
  * that were never drawn — invisible, unsupported, or cut off by the entity
  * limit — are left out too, since there is nothing on screen to account for.
+ * `include` narrows the count further (a region, one block name).
  */
-export function takeOff(objects: ObjectInfo[], page: number, hiddenLayers: Set<string>): Takeoff {
+export function takeOff(
+  objects: ObjectInfo[],
+  page: number,
+  hiddenLayers: Set<string>,
+  include?: (object: ObjectInfo, index: number) => boolean
+): Takeoff {
   const blocks = new Map<string, BlockRow>();
   const layers = new Map<string, LayerRow>();
   const totals: Totals = { count: 0, length: 0, area: 0, hatchArea: 0 };
@@ -60,6 +66,7 @@ export function takeOff(objects: ObjectInfo[], page: number, hiddenLayers: Set<s
   objects.forEach((object, index) => {
     if (object.page !== page || object.empty) return;
     if (hiddenLayers.has(object.layer)) return;
+    if (include && !include(object, index)) return;
 
     const layer = layers.get(object.layer) ?? {
       name: object.layer,

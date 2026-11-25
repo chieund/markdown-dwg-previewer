@@ -76,6 +76,8 @@ The extension runs a local [Model Context Protocol](https://modelcontextprotocol
 | `dwg_overview` | Sheets, units, layers, block counts — the place to start |
 | `dwg_find_text` | Text and attributes, accent-insensitive, with what they sit inside or near |
 | `dwg_dimensions` | Dimension values together with the text written on them |
+| `dwg_quantities` | How many of each block, and length and area per layer — exact counts, not a guess |
+| `dwg_measure` | Distances, sizes and areas measured from the geometry where no dimension is drawn |
 | `dwg_show` | Highlights and zooms to objects in your preview, so you see what it means |
 | `dwg_snapshot` | A picture of the view or a region |
 
@@ -85,6 +87,7 @@ The extension runs a local [Model Context Protocol](https://modelcontextprotocol
 |-------|-----|
 | Claude Code | Run **DWG: Connect AI Agents…** (or accept the prompt the first time you open a drawing; it only appears when Claude Code is installed). This runs `claude mcp add` for you and registers the server as `dwg-previewer`. |
 | GitHub Copilot | Automatic on VS Code 1.101 or newer. The tools appear in Copilot Chat agent mode; the first use in a session may take a moment while the server starts. |
+| Cursor, Kiro | Run **DWG: Connect AI Agents…** and pick **Connect Cursor** or **Connect Kiro**. This adds `dwg-previewer` to `~/.cursor/mcp.json` or `~/.kiro/settings/mcp.json`, keeping your other servers; a file with comments is left alone. Kiro picks it up at once; Cursor may need its MCP servers reloaded. |
 | Other agents | Run **DWG: Connect AI Agents…** and copy the URL and the `Authorization` header. Add them to the agent's MCP settings; the config format differs per agent, see its MCP documentation. |
 
 **Which files an agent can read.** Drawings in your workspace folders and drawings open in a preview are free. Any other `.dwg` / `.dxf` needs your click on a modal **Allow** prompt first.
@@ -113,9 +116,10 @@ The format is detected from the file header, so a DWG saved as `.dxf` still open
 | Text | TEXT · MTEXT · ATTRIB — with fonts, alignment and rotation |
 | Blocks | INSERT (nested, rotated, mirrored, scaled, grid arrays) |
 | Dimensions | DIMENSION — dimension and extension lines, arrowheads, text |
+| Notes | TABLE (schedules, with their cell text) · MULTILEADER callouts · LEADER with arrowheads |
 | Other | POINT · 3DFACE (flattened wireframe) · paper-space viewports |
 
-This is a 2D viewer: 3D solids are not drawn. The toolbar names every entity type in a drawing that it cannot draw yet (LEADER, MULTILEADER, TABLE, WIPEOUT and 3D solids are the common ones).
+This is a 2D viewer: 3D solids are not drawn. The toolbar names every entity type in a drawing that it cannot draw yet (WIPEOUT and 3D solids are the common ones).
 
 ## Keyboard and mouse
 

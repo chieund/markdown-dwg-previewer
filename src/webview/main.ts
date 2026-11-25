@@ -1,5 +1,5 @@
 import { computeBounds } from '../shared/bounds';
-import type { DxfEntity } from '../shared/types';
+import type { DxfEntity, Point2D } from '../shared/types';
 import { Bounds, DxfPage, SVG_NS, ViewportView, renderEntity } from './renderer';
 import {
   BUTTON_STEP,
@@ -21,7 +21,7 @@ import { buildInspector } from './inspector';
 import { SearchControl, buildSearchControl } from './searchPanel';
 import type { SearchHit } from './search';
 import { TakeoffPanel, buildTakeoffPanel } from './takeoffPanel';
-import { EMPTY_TAKEOFF, measureSelection, takeOff } from './takeoff';
+import { EMPTY_TAKEOFF, measureSelection, takeOff } from '../shared/takeoff';
 import { Unit, convertArea, convertLength, defaultUnit, formatArea, formatCount, formatLength, knownUnits } from './units';
 import { UTF8_BOM } from './table';
 import { SHOW_DRAWN_WAIT_MS, type AgentResult, type DrawingDiff, type DrawingKey, type ObjectInfo } from '../shared/types';
@@ -38,6 +38,8 @@ import {
   waitUntilDrawn,
 } from './agent';
 import { renderDiff } from './diffView';
+import { legibleColor } from './contrast';
+import { measureRuler, snapPoint } from './measureTool';
 
 declare function acquireVsCodeApi(): { postMessage(msg: unknown): void };
 
@@ -105,6 +107,13 @@ let contentGroup: SVGGElement | null = null;
 /** Group above the content that holds highlighted copies of the selection. */
 let highlightGroup: SVGGElement | null = null;
 let inspector: HTMLElement | null = null;
+/** The ruler: on while the Measure button is pressed in; `points` are in drawing coordinates. */
+let measuring: { points: Point2D[]; hover?: Point2D } | null = null;
+let measureGroup: SVGGElement | null = null;
+let measureButton: HTMLButtonElement | null = null;
+/** How near a corner a click must be to lock onto it. */
+const SNAP_RADIUS_PX = 10;
+const HOVER_SNAP_LIMIT = 200_000;
 let searchControl: SearchControl | null = null;
 let takeoffPanel: TakeoffPanel | null = null;
 /** Unit the quantities panel and the status bar show; from the drawing, then the user. */
@@ -216,8 +225,15 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
   const overlay = document.createElementNS(SVG_NS, 'g');
   overlay.setAttribute('class', 'dwg-highlight');
   flipGroup.appendChild(overlay);
+  const ruler = document.createElementNS(SVG_NS, 'g');
+  ruler.setAttribute('class', 'dwg-ruler');
+  flipGroup.appendChild(ruler);
   contentGroup = styleGroup;
   highlightGroup = overlay;
+  measureGroup = ruler;
+  // A new page or a reload: the old points mean nothing on it
+  if (measuring) measuring = { points: [] };
+  svg.style.cursor = measuring ? 'crosshair' : 'grab';
   svg.appendChild(flipGroup);
   host.appendChild(svg);
   activeSvg = svg;
@@ -232,10 +248,19 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
     const point = clientToViewBox(svg, event.clientX, event.clientY);
     // The scene is drawn through a scale(1,-1) flip, so undo it for display.
     cursorPoint = { x: point.x, y: -point.y };
+    if (measuring && measuring.points.length > 0) {
+      // Following the cursor must stay smooth: on a huge sheet only the click itself snaps
+      measuring.hover = page.entities.length > HOVER_SNAP_LIMIT ? cursorPoint : snapToDrawing(svg, page, cursorPoint).point;
+      drawRuler();
+    }
     updateStatusBar();
   });
   svg.addEventListener('mouseleave', () => {
     cursorPoint = null;
+    if (measuring) {
+      measuring.hover = undefined;
+      drawRuler();
+    }
     updateStatusBar();
   });
 
@@ -251,6 +276,17 @@ function renderCanvas(host: HTMLElement, page: DxfPage, hiddenLayers: Set<string
     const moved = Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y);
     pressed = null;
     if (moved > CLICK_SLOP_PX) return;
+    if (measuring) {
+      const at = clientToViewBox(svg, event.clientX, event.clientY);
+      const { point } = snapToDrawing(svg, page, { x: at.x, y: -at.y });
+      // A third click starts the next measurement
+      // Each click adds a corner; the same corner twice (a double-click) adds one
+      const last = measuring.points[measuring.points.length - 1];
+      if (!last || last.x !== point.x || last.y !== point.y) measuring.points.push(point);
+      drawRuler();
+      updateStatusBar();
+      return;
+    }
     const picked = pickAt(svg, event.clientX, event.clientY);
     if (picked === undefined) clearSelection();
     else if (event.shiftKey) {
@@ -374,6 +410,66 @@ function goToPage(index: number): void {
 }
 
 /** The object under a click: measured in drawing coordinates, within a few pixels of tolerance. */
+/** A point in drawing coordinates, pulled onto a nearby corner of what is visible. */
+function snapToDrawing(svg: SVGSVGElement, page: DxfPage, point: Point2D): { point: Point2D; snapped: boolean } {
+  return snapPoint(page.entities, scene?.hiddenLayers ?? new Set(), point, SNAP_RADIUS_PX * unitsPerPixel(svg));
+}
+
+/**
+ * Draws the ruler: its corners, the path through them and on to the cursor,
+ * and from three corners on the closed shape whose area is reported.
+ */
+function drawRuler(): void {
+  if (!measureGroup) return;
+  measureGroup.textContent = '';
+  if (!measuring || measuring.points.length === 0) return;
+  const points = measuring.points;
+  const add = (tag: string, className: string, attrs: Record<string, string>) => {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    el.setAttribute('class', className);
+    el.setAttribute('vector-effect', 'non-scaling-stroke');
+    measureGroup!.appendChild(el);
+  };
+  const list = (ps: Point2D[]) => ps.map((p) => `${p.x},${p.y}`).join(' ');
+  if (points.length >= 3) add('polygon', 'dwg-ruler-area', { points: list(points) });
+  const path = measuring.hover ? [...points, measuring.hover] : points;
+  if (path.length >= 2) add('polyline', 'dwg-ruler-line', { points: list(path) });
+  // A zero-length round-capped stroke is a dot that keeps its size at any zoom
+  for (const p of points) add('line', 'dwg-ruler-end', { x1: String(p.x), y1: String(p.y), x2: String(p.x), y2: String(p.y) });
+}
+
+function setMeasuring(on: boolean): void {
+  measuring = on ? { points: [] } : null;
+  measureButton?.classList.toggle('dwg-active', on);
+  measureButton?.setAttribute('aria-pressed', String(on));
+  if (activeSvg) activeSvg.style.cursor = on ? 'crosshair' : 'grab';
+  if (on) clearSelection();
+  drawRuler();
+  updateStatusBar();
+}
+
+function buildMeasureButton(): HTMLElement {
+  const button = document.createElement('button');
+  button.className = 'dwg-layer-button';
+  button.textContent = 'Measure';
+  button.title = 'Measure distances and areas: click points (they lock onto corners). Esc to start over.';
+  button.setAttribute('aria-pressed', String(!!measuring));
+  button.classList.toggle('dwg-active', !!measuring);
+  button.addEventListener('click', () => setMeasuring(!measuring));
+  measureButton = button;
+  return button;
+}
+
+function buildAiButton(): HTMLElement {
+  const button = document.createElement('button');
+  button.className = 'dwg-layer-button';
+  button.textContent = 'Ask AI';
+  button.title = 'Connect an AI agent (Claude Code, Copilot…) so it can read this drawing';
+  button.addEventListener('click', () => vscodeApi.postMessage({ type: 'CONNECT_AI' }));
+  return button;
+}
+
 function pickAt(svg: SVGSVGElement, clientX: number, clientY: number): number | undefined {
   if (!scene) return undefined;
   const point = clientToViewBox(svg, clientX, clientY);
@@ -573,8 +669,30 @@ function updateStatusBar(): void {
     statusBar.appendChild(span(parts.join(' · '), 'dwg-status-selection'));
   }
 
+  if (measuring) {
+    const insunits = drawingUnits();
+    // A zero leg is an answer (the points are level), not a missing value
+    const show = (value: number) => (value === 0 ? '0' : formatLength(convertLength(value, insunits, outputUnit), outputUnit));
+    const ruler = measureRuler(measuring.points, measuring.hover);
+    let text = 'Measure: click the first point';
+    if (ruler?.kind === 'distance') {
+      text = `Distance ${show(ruler.distance)} · ΔX ${show(ruler.dx)} · ΔY ${show(ruler.dy)}`;
+    } else if (ruler?.kind === 'shape') {
+      const area = convertArea(ruler.area, insunits, outputUnit);
+      text = `${ruler.corners} points · length ${show(ruler.length)} · closed ${show(ruler.perimeter)} · area ${area === 0 ? '0' : formatArea(area, outputUnit)}`;
+    }
+    statusBar.appendChild(span(text, 'dwg-status-selection'));
+  }
+
   statusBar.appendChild(span('', 'dwg-status-spacer'));
-  statusBar.appendChild(span('Scroll = zoom · Drag = pan · Double-click = fit', 'dwg-status-hint'));
+  statusBar.appendChild(
+    span(
+      measuring
+        ? 'Click points (they lock onto corners) · 3+ points give an area · Backspace = undo · Esc = start over'
+        : 'Scroll = zoom · Drag = pan · Double-click = fit',
+      'dwg-status-hint'
+    )
+  );
 }
 
 let clipCounter = 0;
@@ -655,7 +773,9 @@ function refreshLayerControl() {
 }
 
 function buildLayerControl(scene: Scene): HTMLElement | null {
-  const layers = scene.pages[scene.pageIndex].layers;
+  // AutoCAD's own bookkeeping layers (`*LayerNameForDynamicConstraint`) go below the drafter's
+  const internal = (name: string) => (name.startsWith('*') ? 1 : 0);
+  const layers = [...scene.pages[scene.pageIndex].layers].sort((a, b) => internal(a.name) - internal(b.name));
   if (layers.length === 0) return null;
 
   const wrapper = document.createElement('div');
@@ -951,6 +1071,12 @@ function renderScene(
   drawingObjects: ObjectInfo[] = [],
   insunits?: number
 ) {
+  // Colours are fixed once here, so the canvas, the layer list and exports agree
+  for (const page of pages) {
+    for (const layer of page.layers) layer.color = legibleColor(layer.color);
+    for (const entity of page.entities) entity.color = legibleColor(entity.color);
+    for (const view of page.viewports ?? []) for (const entity of view.entities) entity.color = legibleColor(entity.color);
+  }
   objects = drawingObjects;
   selection = [];
   inspector = null;
@@ -991,8 +1117,10 @@ function renderScene(
     layerSlot,
     searchControl.element,
     buildTakeoffButton(),
+    buildMeasureButton(),
     buildZoomControls(),
     buildExportControls(),
+    buildAiButton(),
     buildSkippedBanner(skippedEntityTypes),
     ...warnings.map(buildBanner),
   ]) {
@@ -1230,9 +1358,15 @@ window.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && searchControl) {
     event.preventDefault();
     searchControl.open();
+  } else if (event.key === 'Backspace' && measuring?.points.length && !(event.target instanceof HTMLInputElement)) {
+    measuring.points.pop();
+    drawRuler();
+    updateStatusBar();
   } else if (event.key === 'Escape') {
     // Innermost first: the search, then the selection and its inspector, then the panel
     if (searchControl?.isOpen()) searchControl.close();
+    // A measurement in progress is cleared first, then the tool is left
+    else if (measuring) setMeasuring(measuring.points.length > 0);
     else if (selection.length || inspector) clearSelection();
     else if (takeoffPanel) closeTakeoffPanel();
   }

@@ -1,6 +1,9 @@
 import * as path from 'path';
 import { computeBounds } from '../shared/bounds';
-import type { Bounds, DrawingKey, ShowRequest, SnapshotRequest, TextEntity } from '../shared/types';
+import { takeOff } from '../shared/takeoff';
+import type { Bounds, DrawingKey, DxfEntity, Point2D, ShowRequest, SnapshotRequest, TextEntity } from '../shared/types';
+import { pathLength, polygonArea } from '../dxf/measure';
+import { enclosuresAt, gapBetween, segmentsOf } from './measure';
 import { fold, indexOf, type DrawingIndex } from './drawingIndex';
 import type { DrawingStore, StoredDrawing } from './drawingStore';
 
@@ -50,7 +53,7 @@ export const TOOL_DEFINITIONS: { name: string; description: string; inputSchema:
   {
     name: 'dwg_find_text',
     description:
-      'Find text in the drawing: TEXT/MTEXT labels, dimension values, block names and attribute values. Search is case- and accent-insensitive ("coc" matches "cọc"). Each match has its id, layer, page, center and size in drawing units, what it sits "inside" (frames, big blocks) and the "nearby" objects, nearest first (to tell what a label refers to). Omit query to list all text. When "truncated" is true, not all matches are returned: narrow the query or use page/layer.',
+      'Find text in the drawing: TEXT/MTEXT labels, dimension values, block names and attribute values. Search is case- and accent-insensitive ("coc" matches "cọc"). Each match has its id, layer, page, center and size in drawing units, what it sits "inside" (frames, big blocks) and the "nearby" objects, nearest first (to tell what a label refers to). Omit query to list all text. To count blocks or total lengths and areas use dwg_quantities, which is exact. When "truncated" is true, not all matches are returned: narrow the query or use page/layer.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -80,6 +83,60 @@ export const TOOL_DEFINITIONS: { name: string; description: string; inputSchema:
           required: ['x', 'y', 'radius'],
         },
         limit: { type: 'number', description: 'Max dimensions listed (default 50, at most 300)' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'dwg_quantities',
+    description:
+      'Count and measure what is drawn, the way an estimator takes off quantities. Use this for "how many doors / columns / piles" and "how much wall" instead of counting search results. Per page: every block with how many times it is inserted (with object ids to highlight), and per layer the object count, total length of linework, enclosed area of closed shapes and hatched area, in drawing units. Narrow it with block (part of a block name), layer, or a region. With block given, the attribute values of the matching blocks are counted too (door types, tags). Counts are exact for what is drawn: a door drawn as loose lines instead of a block is not a block here. Lengths and areas are as drawn, not converted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: PATH_ARG,
+        page: PAGE_ARG,
+        block: { type: 'string', description: 'Only blocks whose name contains this (case- and accent-insensitive)' },
+        layer: { type: 'string', description: 'Only objects on this layer' },
+        region: {
+          type: 'object',
+          description: 'Only objects whose centre is in this box, in drawing coordinates',
+          properties: { minX: { type: 'number' }, minY: { type: 'number' }, maxX: { type: 'number' }, maxY: { type: 'number' } },
+          required: ['minX', 'minY', 'maxX', 'maxY'],
+        },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'dwg_measure',
+    description:
+      'Measure geometry as drawn, in drawing units, when no dimension line gives the answer. Give any of: objects (ids) for each one\'s length, enclosed area, width, height and centre; distance {from, to}, each an object id or a point {x, y}, for the shortest gap between their linework (0 when they touch) and the centre-to-centre distance; points [{x, y}, …] for the length of the path through them and the area it encloses; at {x, y} for the closed shapes drawn around that point, smallest first (a room boundary around its label). A drafted dimension from dwg_dimensions outranks a measurement: drawings are not always to scale, so say which one a number came from.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: PATH_ARG,
+        objects: { type: 'array', items: { type: 'number' }, description: 'Object ids to measure (at most 100)' },
+        distance: {
+          type: 'object',
+          properties: {
+            from: { description: 'Object id, or a point {x, y}' },
+            to: { description: 'Object id, or a point {x, y}' },
+          },
+          required: ['from', 'to'],
+        },
+        points: {
+          type: 'array',
+          items: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] },
+          description: 'Corners of a path or outline, in order',
+        },
+        at: {
+          type: 'object',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          required: ['x', 'y'],
+          description: 'A point; lists the closed shapes around it',
+        },
+        page: { description: 'Page of the at point: index or name (default 0, Model Space)' },
       },
       required: ['path'],
     },
@@ -306,6 +363,9 @@ function overview(stored: StoredDrawing, file: string): ToolContent[] {
   return [{ type: 'text', text: json }];
 }
 
+/** Objects whose drawn text is listed as theirs: a block's labels, a table's cells. */
+const TEXT_OWNERS = new Set(['INSERT', 'ACAD_TABLE']);
+
 type TextHit =
   | { kind: 'object'; id: number }
   | { kind: 'nested'; owner: number; page: number; entity: TextEntity };
@@ -338,7 +398,7 @@ function findText(stored: StoredDrawing, args: Args): ToolContent[] {
     for (const entity of p.entities) {
       if (entity.type !== 'TEXT' || !entity.text || entity.obj === undefined) continue;
       const owner = stored.parsed.objects[entity.obj];
-      if (!owner || owner.type !== 'INSERT' || owner.empty) continue;
+      if (!owner || !TEXT_OWNERS.has(owner.type) || owner.empty) continue;
       // A drawn ATTRIB is text of its INSERT too, but the INSERT's own match already lists it
       if (owner.attributes?.some((a) => !a.hidden && a.value === entity.text)) continue;
       if (!want(entity.text, pageIndex, entity.layer)) continue;
@@ -429,6 +489,292 @@ function dimensions(stored: StoredDrawing, args: Args): ToolContent[] {
   return [{ type: 'text', text: fitList(rows.slice(0, limit), render).json }];
 }
 
+const unitsBlock = (units: number | undefined) => {
+  const name = unitsOf(units);
+  return {
+    units: name,
+    ...(name === UNITS_NOT_DECLARED
+      ? { unitsNote: 'The drawing does not declare ($INSUNITS missing or 0). Do not assume a unit; infer only with stated reasoning.' }
+      : {}),
+  };
+};
+
+function regionArg(v: unknown): Bounds | undefined {
+  if (v === undefined || v === null) return undefined;
+  const r = v as Bounds;
+  if (!(['minX', 'minY', 'maxX', 'maxY'] as const).every((k) => typeof r[k] === 'number' && Number.isFinite(r[k]))) {
+    throw new Error('region needs numeric minX, minY, maxX, maxY');
+  }
+  return { minX: Math.min(r.minX, r.maxX), minY: Math.min(r.minY, r.maxY), maxX: Math.max(r.minX, r.maxX), maxY: Math.max(r.minY, r.maxY) };
+}
+
+/** Ids listed per block row; the count stays exact. */
+const IDS_PER_ROW = 50;
+const VALUES_PER_TAG = 30;
+const TAGS_PER_PAGE = 40;
+const VALUE_CHARS = 80;
+
+function quantities(stored: StoredDrawing, args: Args): ToolContent[] {
+  const { parsed } = stored;
+  const index = indexOf(stored);
+  const onlyPage = pageIndex(stored, args.page);
+  const block = str(args, 'block');
+  const blockQuery = block ? fold(block) : undefined;
+  const layer = str(args, 'layer');
+  const layerQuery = layer ? fold(layer) : undefined;
+  const region = regionArg(args.region);
+  // Folding is per distinct name: a drawing has millions of objects and a few hundred names
+  const verdicts = new Map<string, boolean>();
+  const once = (key: string, test: () => boolean): boolean => {
+    let v = verdicts.get(key);
+    if (v === undefined) verdicts.set(key, (v = test()));
+    return v;
+  };
+  const include = (o: (typeof parsed.objects)[number], id: number): boolean => {
+    if (layerQuery !== undefined && !once(`L${o.layer}`, () => fold(o.layer) === layerQuery)) return false;
+    if (blockQuery !== undefined && !(o.block && once(`B${o.block}`, () => fold(o.block!).includes(blockQuery)))) return false;
+    if (region) {
+      const b = index.bounds(id);
+      if (!b) return false;
+      const cx = (b.minX + b.maxX) / 2;
+      const cy = (b.minY + b.maxY) / 2;
+      if (cx < region.minX || cx > region.maxX || cy < region.minY || cy > region.maxY) return false;
+    }
+    return true;
+  };
+  const none = new Set<string>();
+  const measures = (m: { length: number; area: number; hatchArea: number }) => ({
+    ...(m.length ? { length: round(m.length) } : {}),
+    ...(m.area ? { area: round(m.area) } : {}),
+    ...(m.hatchArea ? { hatchArea: round(m.hatchArea) } : {}),
+  });
+  const pages: Record<string, unknown>[] = [];
+  parsed.pages.forEach((p, i) => {
+    if (onlyPage !== undefined && i !== onlyPage) return;
+    const t = takeOff(parsed.objects, i, none, include);
+    if (t.totals.count === 0 && onlyPage === undefined) return;
+    // Anonymous blocks (`*U12`) are the file's own bookkeeping names: after the named ones
+    const anonymous = (name: string) => (name.startsWith('*') ? 1 : 0);
+    const blocks = t.blocks
+      .sort((a, b) => anonymous(a.name) - anonymous(b.name) || b.count - a.count || a.name.localeCompare(b.name))
+      .map((row) => ({
+        block: row.name,
+        count: row.count,
+        ids: row.objects.slice(0, IDS_PER_ROW),
+        ...(row.objects.length > IDS_PER_ROW ? { idsTruncated: true } : {}),
+      }));
+    const out: Record<string, unknown> = {
+      page: p.name,
+      index: i,
+      totals: { objects: t.totals.count, ...measures(t.totals) },
+      blocks,
+      // With a block filter the layer rows would only repeat the blocks
+      ...(blockQuery === undefined
+        ? {
+            layers: t.layers
+              .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+              .map((row) => ({ layer: row.name, objects: row.count, ...measures(row) })),
+          }
+        : {}),
+    };
+    if (blockQuery !== undefined) {
+      // What the matching blocks say about themselves: door type, mark, size
+      const tags = new Map<string, Map<string, number>>();
+      for (const row of t.blocks) {
+        for (const id of row.objects) {
+          for (const a of parsed.objects[id].attributes ?? []) {
+            if (!a.value) continue;
+            const value = a.value.length > VALUE_CHARS ? `${a.value.slice(0, VALUE_CHARS)}…` : a.value;
+            const values = tags.get(a.tag) ?? new Map<string, number>();
+            values.set(value, (values.get(value) ?? 0) + 1);
+            tags.set(a.tag, values);
+          }
+        }
+      }
+      if (tags.size) {
+        out.attributeValues = Object.fromEntries(
+          [...tags].slice(0, TAGS_PER_PAGE).map(([tag, values]) => [
+            tag,
+            Object.fromEntries([...values].sort((a, b) => b[1] - a[1]).slice(0, VALUES_PER_TAG)),
+          ])
+        );
+      }
+    }
+    pages.push(out);
+  });
+  const filter = {
+    ...(block ? { block } : {}),
+    ...(layer ? { layer } : {}),
+    ...(region ? { region: box(region) } : {}),
+  };
+  const render = (keep: number) => {
+    let truncated = false;
+    const cut = <T,>(list: T[]): T[] => {
+      const n = Math.max(0, Math.ceil(list.length * keep));
+      if (n < list.length) truncated = true;
+      return list.slice(0, n);
+    };
+    const shown = pages.map((pg) => ({
+      ...pg,
+      blocks: cut(pg.blocks as unknown[]),
+      ...(pg.layers ? { layers: cut(pg.layers as unknown[]) } : {}),
+    }));
+    return JSON.stringify(
+      {
+        ...unitsBlock(parsed.units),
+        ...(Object.keys(filter).length ? { filter } : {}),
+        ...(parsed.warnings?.length ? { warnings: parsed.warnings } : {}),
+        ...(truncated ? { truncated: true, note: 'Lists are cut, most frequent first; totals are exact. Narrow with page, block or layer.' } : {}),
+        pages: shown,
+      },
+      null,
+      1
+    );
+  };
+  let keep = 1;
+  let json = render(keep);
+  while (json.length > MAX_OUTPUT_CHARS && keep > 0) {
+    keep = keep > 0.01 ? keep / 2 : 0;
+    json = render(keep);
+  }
+  return [{ type: 'text', text: json }];
+}
+
+const MAX_MEASURED = 100;
+
+function pointArg(v: unknown, what: string): Point2D {
+  const p = v as Point2D;
+  if (!p || typeof p.x !== 'number' || typeof p.y !== 'number' || !Number.isFinite(p.x) || !Number.isFinite(p.y)) {
+    throw new Error(`${what} needs numeric x and y`);
+  }
+  return { x: p.x, y: p.y };
+}
+
+const pt = (p: Point2D) => ({ x: round(p.x), y: round(p.y) });
+
+/** The entities drawn for one object, with the page they are on. */
+function entitiesOfObject(stored: StoredDrawing, id: number): { page: number; entities: DxfEntity[] } {
+  const o = stored.parsed.objects[id];
+  if (!Number.isInteger(id) || !o) throw new Error(`No object ${id}`);
+  const entities = (stored.parsed.pages[o.page]?.entities ?? []).filter((e) => e.obj === id);
+  if (o.empty || entities.length === 0) throw new Error(`Object ${id} has no geometry`);
+  return { page: o.page, entities };
+}
+
+function measure(stored: StoredDrawing, args: Args): ToolContent[] {
+  const { parsed } = stored;
+  const index = indexOf(stored);
+  const out: Record<string, unknown> = { ...unitsBlock(parsed.units) };
+  let asked = false;
+
+  const ids = numberList(args.objects) && [...new Set(numberList(args.objects))];
+  if (ids?.length) {
+    asked = true;
+    if (ids.length > MAX_MEASURED) throw new Error(`At most ${MAX_MEASURED} objects per call`);
+    const totals = { length: 0, area: 0, hatchArea: 0 };
+    out.objects = ids.map((id) => {
+      const o = parsed.objects[id];
+      if (!o) throw new Error(`No object ${id}`);
+      const b = index.bounds(id);
+      totals.length += o.length ?? 0;
+      totals.area += o.area ?? 0;
+      totals.hatchArea += o.hatchArea ?? 0;
+      return {
+        id,
+        type: o.type,
+        layer: o.layer,
+        page: parsed.pages[o.page]?.name,
+        ...(o.block ? { block: o.block } : {}),
+        ...(o.length ? { length: round(o.length) } : {}),
+        ...(o.area ? { area: round(o.area) } : {}),
+        ...(o.hatchArea ? { hatchArea: round(o.hatchArea) } : {}),
+        ...(b ? { width: round(b.maxX - b.minX), height: round(b.maxY - b.minY), center: center(b) } : { noGeometry: true }),
+      };
+    });
+    if (ids.length > 1) {
+      out.totals = { objects: ids.length, length: round(totals.length), area: round(totals.area), hatchArea: round(totals.hatchArea) };
+    }
+  }
+
+  if (args.distance !== undefined && args.distance !== null) {
+    asked = true;
+    const d = args.distance as { from?: unknown; to?: unknown };
+    const end = (v: unknown, what: string) => {
+      if (typeof v === 'number') {
+        const { page, entities } = entitiesOfObject(stored, v);
+        const b = index.bounds(v);
+        if (!b) throw new Error(`Object ${v} has no geometry`);
+        return { page, segments: segmentsOf(entities), centre: { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 }, label: { object: v } };
+      }
+      const p = pointArg(v, `distance.${what}`);
+      return { page: undefined, segments: [{ a: p, b: p }], centre: p, label: { point: pt(p) } };
+    };
+    const from = end(d.from, 'from');
+    const to = end(d.to, 'to');
+    if (from.page !== undefined && to.page !== undefined && from.page !== to.page) {
+      throw new Error(
+        `Objects are on different pages (${parsed.pages[from.page]?.name} and ${parsed.pages[to.page]?.name}); a distance between them means nothing`
+      );
+    }
+    const gap = gapBetween(from.segments, to.segments);
+    if (!gap) throw new Error('Nothing to measure between');
+    out.distance = {
+      from: from.label,
+      to: to.label,
+      gap: round(gap.distance),
+      gapFrom: pt(gap.from),
+      gapTo: pt(gap.to),
+      dx: round(Math.abs(gap.to.x - gap.from.x)),
+      dy: round(Math.abs(gap.to.y - gap.from.y)),
+      centerToCenter: round(Math.hypot(to.centre.x - from.centre.x, to.centre.y - from.centre.y)),
+      centerDx: round(Math.abs(to.centre.x - from.centre.x)),
+      centerDy: round(Math.abs(to.centre.y - from.centre.y)),
+      ...(gap.approximate ? { approximate: true } : {}),
+    };
+  }
+
+  if (args.points !== undefined && args.points !== null) {
+    asked = true;
+    if (!Array.isArray(args.points) || args.points.length < 2) throw new Error('points needs at least two points');
+    if (args.points.length > 10_000) throw new Error('At most 10000 points per call');
+    const points = args.points.map((p, i) => pointArg(p, `points[${i}]`));
+    out.path = {
+      points: points.length,
+      length: round(pathLength(points, false)),
+      ...(points.length > 2 ? { closedLength: round(pathLength(points, true)), area: round(polygonArea(points)) } : {}),
+    };
+  }
+
+  if (args.at !== undefined && args.at !== null) {
+    asked = true;
+    const at = pointArg(args.at, 'at');
+    const page = pageIndex(stored, args.page) ?? 0;
+    const shapes = enclosuresAt(parsed.pages[page]?.entities ?? [], at, 10);
+    out.at = pt(at);
+    out.page = parsed.pages[page]?.name;
+    out.enclosing = shapes.map((s) => {
+      const o = parsed.objects[s.obj];
+      return {
+        id: s.obj,
+        type: o?.type,
+        layer: s.layer,
+        ...(o?.block ? { block: o.block } : {}),
+        shape: s.kind,
+        area: round(s.area),
+        width: round(s.width),
+        height: round(s.height),
+      };
+    });
+    if (shapes.length === 0) {
+      out.enclosingNote =
+        'No closed polyline, circle or hatch is drawn around this point. A room outlined with separate lines is not a closed shape: measure it with points or distance instead.';
+    }
+  }
+
+  if (!asked) throw new Error('Give at least one of: objects, distance, points, at');
+  return text(out);
+}
+
 function numberList(v: unknown): number[] | undefined {
   if (v === undefined) return undefined;
   if (!Array.isArray(v) || !v.every((n) => Number.isInteger(n) && n >= 0)) throw new Error('objects must be a list of object ids');
@@ -482,6 +828,10 @@ async function runTool(host: ToolHost, name: string, args: Record<string, unknow
         return findText(stored, args);
       case 'dwg_dimensions':
         return dimensions(stored, args);
+      case 'dwg_quantities':
+        return quantities(stored, args);
+      case 'dwg_measure':
+        return measure(stored, args);
       case 'dwg_show': {
         const preview = requirePreview(host);
         const layers = args.layers as Record<string, unknown> | undefined;

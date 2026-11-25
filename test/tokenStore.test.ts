@@ -7,7 +7,8 @@ import { getOrCreateToken, type SecretStore } from '../src/ai/tokenStore';
 
 const KEY = 'test.ai.token';
 
-function fakeSecrets(initial?: string): SecretStore & { writes: number } {
+/** A keyring; `delayMs` makes writes slow, like an OS keyring prompt. */
+function fakeSecrets(initial?: string, delayMs = 0): SecretStore & { writes: number } {
   let value = initial;
   return {
     writes: 0,
@@ -16,6 +17,7 @@ function fakeSecrets(initial?: string): SecretStore & { writes: number } {
     },
     async store(_key, next) {
       this.writes++;
+      if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
       value = next;
     },
   };
@@ -59,5 +61,18 @@ test('a lock left by a crashed window is recovered', async () => {
   const secrets = fakeSecrets();
   const token = await getOrCreateToken(secrets, dir, KEY);
   assert.match(token, /^[0-9a-f]{64}$/);
+  await assert.rejects(fs.stat(lock), /ENOENT/);
+});
+
+test('two windows breaking the same stale lock still agree on one token', async () => {
+  const dir = await tmp();
+  const lock = path.join(dir, 'ai-token.lock');
+  await fs.writeFile(lock, 'crashed-window');
+  const old = new Date(Date.now() - 60_000);
+  await fs.utimes(lock, old, old);
+  const secrets = fakeSecrets(undefined, 30);
+  const tokens = await Promise.all(Array.from({ length: 12 }, () => getOrCreateToken(secrets, dir, KEY)));
+  assert.equal(new Set(tokens).size, 1);
+  assert.equal(secrets.writes, 1);
   await assert.rejects(fs.stat(lock), /ENOENT/);
 });
