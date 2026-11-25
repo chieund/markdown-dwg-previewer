@@ -500,6 +500,10 @@ function parseAttrib(
     const code = lines[i].trim();
     const value = lines[i + 1].trim();
     if (code === '0') break;
+    // A multiline attribute ends with an Xrecord and an embedded MTEXT object that reuse
+    // the same group codes (10/20/40/1/8); they are not this attribute's fields. R12
+    // attributes have neither marker, so they still read to the end.
+    if (code === '101' || (code === '100' && value === 'AcDbXrecord')) break;
 
     switch (code) {
       case '8': layer = value; break;
